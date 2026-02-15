@@ -42,8 +42,4 @@ ctest --test-dir build --output-on-failure
   - 必填：`--ust`、`--out`
   - 可选：`--sr`（自动限制在 8000~192000）
 
-## 后续建议
-
-- 接入真实 voicebank 与 `oto.ini` 索引
-- 替换占位重采样器为兼容 UTAU 的实现
-- 引入并行任务调度、缓存与更完整的自动化测试
+## 使用OpenAI Codex半自动化流程PR以及代码编写，部分修润
