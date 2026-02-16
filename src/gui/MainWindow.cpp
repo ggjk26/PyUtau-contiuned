@@ -4,6 +4,7 @@
 
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QCheckBox>
 #include <QFileDialog>
 #include <QFormLayout>
 #include <QInputDialog>
@@ -101,7 +102,13 @@ void MainWindow::manageVoicebanks() {
 
         const auto key = name.toStdString();
         m_voicebankPool[key] = std::move(vb);
-        m_statusLabel->setText(QString("Voicebank added: %1 (%2 aliases)").arg(name).arg(m_voicebankPool[key].size()));
+
+        const auto report = m_voicebankPool[key].runAiPostProcessAndRetrain(m_settings.enableVoicebankAiRetrain);
+        m_statusLabel->setText(QString("Voicebank added: %1 (%2 aliases) | AI retrain=%3 generated=%4")
+                                   .arg(name)
+                                   .arg(m_voicebankPool[key].size())
+                                   .arg(report.enabled ? "ON" : "OFF")
+                                   .arg(report.generatedAliases));
         bindProjectToUi();
         return;
     }
@@ -280,9 +287,13 @@ void MainWindow::openSettings() {
     sampleRateSpin->setSingleStep(1000);
     sampleRateSpin->setValue(m_settings.sampleRate);
 
+    auto* retrainCheck = new QCheckBox("Enable AI retrain after importing voicebank", &dialog);
+    retrainCheck->setChecked(m_settings.enableVoicebankAiRetrain);
+
     layout->addRow("Render Threads (0=Auto)", threadSpin);
     layout->addRow("Master Gain", gainSpin);
     layout->addRow("Sample Rate", sampleRateSpin);
+    layout->addRow("Voicebank", retrainCheck);
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
     layout->addRow(buttons);
@@ -296,11 +307,13 @@ void MainWindow::openSettings() {
     m_settings.maxRenderThreads = static_cast<unsigned int>(threadSpin->value());
     m_settings.masterGain = static_cast<float>(gainSpin->value());
     m_settings.sampleRate = sampleRateSpin->value();
+    m_settings.enableVoicebankAiRetrain = retrainCheck->isChecked();
 
-    m_statusLabel->setText(QString("Settings saved | threads=%1 masterGain=%2 sampleRate=%3")
+    m_statusLabel->setText(QString("Settings saved | threads=%1 masterGain=%2 sampleRate=%3 aiRetrain=%4")
                                .arg(m_settings.maxRenderThreads)
                                .arg(QString::number(m_settings.masterGain, 'f', 2))
-                               .arg(m_settings.sampleRate));
+                               .arg(m_settings.sampleRate)
+                               .arg(m_settings.enableVoicebankAiRetrain ? "ON" : "OFF"));
 }
 
 void MainWindow::addTrack() {

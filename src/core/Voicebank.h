@@ -16,11 +16,20 @@ struct OtoEntry {
     double overlapMs = 0.0;
 };
 
+struct VoicebankAiTrainingReport {
+    bool enabled = false;
+    std::size_t sampleCount = 0;
+    std::size_t generatedAliases = 0;
+    double elapsedMs = 0.0;
+};
+
 class Voicebank {
 public:
     bool loadFromDirectory(const std::filesystem::path& path);
     [[nodiscard]] const OtoEntry* lookup(const std::string& lyric) const;
     [[nodiscard]] std::size_t size() const;
+
+    [[nodiscard]] VoicebankAiTrainingReport runAiPostProcessAndRetrain(bool enabled);
 
 private:
     std::unordered_map<std::string, OtoEntry> m_dictionary;

@@ -38,6 +38,7 @@ private:
         unsigned int maxRenderThreads = 0;
         float masterGain = 0.95F;
         int sampleRate = 44100;
+        bool enableVoicebankAiRetrain = false;
     };
 
     [[nodiscard]] pyutau::core::Track applyDictionary(const pyutau::core::Track& track) const;
