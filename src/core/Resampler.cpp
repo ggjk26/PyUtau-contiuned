@@ -28,6 +28,46 @@ int tickToFrame(int tick, double framesPerTick) {
     return static_cast<int>(std::lround(static_cast<double>(tick) * framesPerTick));
 }
 
+double interpolatePitchBendCents(const Note& note, double progress01) {
+    if (note.pitchBendCents.empty()) {
+        return 0.0;
+    }
+    if (note.pitchBendCents.size() == 1) {
+        return static_cast<double>(note.pitchBendCents.front());
+    }
+
+    const double clamped = std::clamp(progress01, 0.0, 1.0);
+    const double position = clamped * static_cast<double>(note.pitchBendCents.size() - 1);
+    const auto index = static_cast<std::size_t>(position);
+    const auto nextIndex = std::min(index + 1, note.pitchBendCents.size() - 1);
+    const double frac = position - static_cast<double>(index);
+    const double p0 = static_cast<double>(note.pitchBendCents[index]);
+    const double p1 = static_cast<double>(note.pitchBendCents[nextIndex]);
+    return p0 + (p1 - p0) * frac;
+}
+
+double computeAutoPitchCents(const Note& note, double secondsFromStart, double progress01) {
+    if (!note.autoPitchEnabled) {
+        return 0.0;
+    }
+
+    double cents = 0.0;
+
+    // Soft attack scoop into target pitch.
+    if (progress01 < 0.12) {
+        const double t = progress01 / 0.12;
+        cents += -28.0 * (1.0 - t);
+    }
+
+    // Controlled vibrato toward note tail.
+    if (progress01 > 0.35) {
+        const double env = std::min(1.0, (progress01 - 0.35) / 0.20);
+        cents += static_cast<double>(note.autoVibratoDepthCents) * env * std::sin(2.0 * kPi * note.autoVibratoRateHz * secondsFromStart);
+    }
+
+    return cents;
+}
+
 } // namespace
 
 RenderResult Resampler::renderTrack(const Track& track,
@@ -76,11 +116,18 @@ RenderResult Resampler::renderTrack(const Track& track,
                 }
 
                 const int renderFrames = std::min(noteFrames, totalFrames - startFrame);
-                const auto frequency = 440.0 * std::pow(2.0, (static_cast<double>(note.pitch) - 69.0) / 12.0);
-                const auto phaseStep = 2.0 * kPi * frequency / static_cast<double>(sampleRate);
+                const auto baseFrequency = 440.0 * std::pow(2.0, (static_cast<double>(note.pitch) - 69.0) / 12.0);
+                double phase = 0.0;
 
                 for (int f = 0; f < renderFrames; ++f) {
-                    const auto phase = phaseStep * static_cast<double>(f);
+                    const double progress = static_cast<double>(f) / static_cast<double>(std::max(1, renderFrames - 1));
+                    const double secondsFromStart = static_cast<double>(f) / static_cast<double>(sampleRate);
+                    const double manualCents = interpolatePitchBendCents(note, progress);
+                    const double autoCents = computeAutoPitchCents(note, secondsFromStart, progress);
+                    const double cents = manualCents + autoCents;
+                    const double modFrequency = baseFrequency * std::pow(2.0, cents / 1200.0);
+
+                    phase += 2.0 * kPi * modFrequency / static_cast<double>(sampleRate);
                     local[static_cast<std::size_t>(startFrame + f)] += static_cast<float>(kAmplitude * std::sin(phase));
                 }
             }

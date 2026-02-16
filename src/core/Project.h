@@ -13,6 +13,14 @@ struct Note {
     int durationTick = 480;
     int velocity = 100;
     std::string lyric = "a";
+
+    // Manual pitch line points in cents sampled uniformly across the note duration.
+    std::vector<int> pitchBendCents;
+
+    // Automatic pitch-line enhancement controls.
+    bool autoPitchEnabled = true;
+    int autoVibratoDepthCents = 18;
+    double autoVibratoRateHz = 5.5;
 };
 
 struct TempoPoint {

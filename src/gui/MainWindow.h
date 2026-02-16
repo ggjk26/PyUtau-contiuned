@@ -39,9 +39,13 @@ private:
         float masterGain = 0.95F;
         int sampleRate = 44100;
         bool enableVoicebankAiRetrain = false;
+        bool enableAutoPitchLine = true;
+        int autoVibratoDepthCents = 18;
+        double autoVibratoRateHz = 5.5;
     };
 
     [[nodiscard]] pyutau::core::Track applyDictionary(const pyutau::core::Track& track) const;
+    [[nodiscard]] pyutau::core::Track applyPitchEnhancements(const pyutau::core::Track& track) const;
     void buildUi();
     void bindProjectToUi();
 

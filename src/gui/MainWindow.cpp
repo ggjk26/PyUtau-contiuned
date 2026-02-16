@@ -290,10 +290,26 @@ void MainWindow::openSettings() {
     auto* retrainCheck = new QCheckBox("Enable AI retrain after importing voicebank", &dialog);
     retrainCheck->setChecked(m_settings.enableVoicebankAiRetrain);
 
+    auto* autoPitchCheck = new QCheckBox("Enable auto pitch-line enhancement", &dialog);
+    autoPitchCheck->setChecked(m_settings.enableAutoPitchLine);
+
+    auto* vibratoDepthSpin = new QSpinBox(&dialog);
+    vibratoDepthSpin->setRange(0, 120);
+    vibratoDepthSpin->setValue(m_settings.autoVibratoDepthCents);
+
+    auto* vibratoRateSpin = new QDoubleSpinBox(&dialog);
+    vibratoRateSpin->setRange(0.1, 12.0);
+    vibratoRateSpin->setDecimals(2);
+    vibratoRateSpin->setSingleStep(0.1);
+    vibratoRateSpin->setValue(m_settings.autoVibratoRateHz);
+
     layout->addRow("Render Threads (0=Auto)", threadSpin);
     layout->addRow("Master Gain", gainSpin);
     layout->addRow("Sample Rate", sampleRateSpin);
     layout->addRow("Voicebank", retrainCheck);
+    layout->addRow("Pitch", autoPitchCheck);
+    layout->addRow("Vibrato Depth (cents)", vibratoDepthSpin);
+    layout->addRow("Vibrato Rate (Hz)", vibratoRateSpin);
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
     layout->addRow(buttons);
@@ -308,12 +324,18 @@ void MainWindow::openSettings() {
     m_settings.masterGain = static_cast<float>(gainSpin->value());
     m_settings.sampleRate = sampleRateSpin->value();
     m_settings.enableVoicebankAiRetrain = retrainCheck->isChecked();
+    m_settings.enableAutoPitchLine = autoPitchCheck->isChecked();
+    m_settings.autoVibratoDepthCents = vibratoDepthSpin->value();
+    m_settings.autoVibratoRateHz = vibratoRateSpin->value();
 
-    m_statusLabel->setText(QString("Settings saved | threads=%1 masterGain=%2 sampleRate=%3 aiRetrain=%4")
+    m_statusLabel->setText(QString("Settings saved | threads=%1 masterGain=%2 sampleRate=%3 aiRetrain=%4 autoPitch=%5 vib=%6c/%7Hz")
                                .arg(m_settings.maxRenderThreads)
                                .arg(QString::number(m_settings.masterGain, 'f', 2))
                                .arg(m_settings.sampleRate)
-                               .arg(m_settings.enableVoicebankAiRetrain ? "ON" : "OFF"));
+                               .arg(m_settings.enableVoicebankAiRetrain ? "ON" : "OFF")
+                               .arg(m_settings.enableAutoPitchLine ? "ON" : "OFF")
+                               .arg(m_settings.autoVibratoDepthCents)
+                               .arg(QString::number(m_settings.autoVibratoRateHz, 'f', 2)));
 }
 
 void MainWindow::addTrack() {
@@ -352,6 +374,16 @@ pyutau::core::Track MainWindow::applyDictionary(const pyutau::core::Track& track
     return replaced;
 }
 
+pyutau::core::Track MainWindow::applyPitchEnhancements(const pyutau::core::Track& track) const {
+    auto enhanced = track;
+    for (auto& note : enhanced.notes) {
+        note.autoPitchEnabled = m_settings.enableAutoPitchLine;
+        note.autoVibratoDepthCents = m_settings.autoVibratoDepthCents;
+        note.autoVibratoRateHz = m_settings.autoVibratoRateHz;
+    }
+    return enhanced;
+}
+
 void MainWindow::exportWav() {
     if (m_project.tracks().empty()) {
         QMessageBox::information(this, "Export", "No tracks available.");
@@ -383,7 +415,8 @@ void MainWindow::exportWav() {
         }
 
         const auto mappedTrack = applyDictionary(track);
-        auto rendered = m_resampler.renderTrack(mappedTrack, *vb, m_settings.sampleRate, m_settings.maxRenderThreads);
+        const auto pitchedTrack = applyPitchEnhancements(mappedTrack);
+        auto rendered = m_resampler.renderTrack(pitchedTrack, *vb, m_settings.sampleRate, m_settings.maxRenderThreads);
         if (rendered.pcm.empty()) {
             continue;
         }

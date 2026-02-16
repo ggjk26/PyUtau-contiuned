@@ -139,6 +139,36 @@ int extractIntValue(const std::string& object, const std::string& key, int fallb
     return std::stoi(object.substr(begin, end - begin));
 }
 
+std::vector<int> parseCsvInts(const std::string& text) {
+    std::vector<int> values;
+    std::stringstream ss(text);
+    std::string token;
+    while (std::getline(ss, token, ',')) {
+        token = trim(token);
+        if (token.empty()) {
+            continue;
+        }
+        values.push_back(std::stoi(token));
+    }
+    return values;
+}
+
+std::vector<int> extractIntArrayValue(const std::string& object, const std::string& key) {
+    const auto keyPos = object.find("\"" + key + "\"");
+    if (keyPos == std::string::npos) {
+        return {};
+    }
+    const auto start = object.find('[', keyPos);
+    if (start == std::string::npos) {
+        return {};
+    }
+    const auto end = findMatching(object, start, "["[0], "]"[0]);
+    if (end == std::string::npos || end <= start + 1) {
+        return {};
+    }
+    return parseCsvInts(object.substr(start + 1, end - start - 1));
+}
+
 double extractDoubleValue(const std::string& text, const std::string& key, double fallback) {
     const auto keyPos = text.find("\"" + key + "\"");
     if (keyPos == std::string::npos) {
@@ -217,6 +247,8 @@ Project parseUst(const std::filesystem::path& filePath) {
             currentNote.pitch = std::stoi(value);
         } else if (inNote && key == "Velocity") {
             currentNote.velocity = std::stoi(value);
+        } else if (inNote && key == "PBY") {
+            currentNote.pitchBendCents = parseCsvInts(value);
         }
     }
 
@@ -268,6 +300,7 @@ Project parseUstx(const std::filesystem::path& filePath) {
             if (note.lyric.empty()) {
                 note.lyric = "a";
             }
+            note.pitchBendCents = extractIntArrayValue(noteObj, "pitch");
             track.notes.push_back(note);
         }
     }
