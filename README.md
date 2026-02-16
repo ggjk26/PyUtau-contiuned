@@ -12,10 +12,11 @@
   - 起音速度（velocity）影响 attack
   - 连音滑音（前音到当前音）
   - 尾部颤音（vibrato）
-  - cutoff/overlap 的基础处理
+  - overlap 无缝处理（避免插入静音断裂）
+  - 轻量低通 + DC Block + 软削波，减少刺耳与爆音
 - 输出 16-bit PCM WAV
 
-> 说明：当前仍是“可运行骨架”，尚未实现 OpenUTAU 级别的真正重采样器 + wavtool 拼接、音素词典、完整 pitch curve 等。
+> 说明：当前仍是“可运行骨架”，但已加入一批轻量音质优化与性能优化（预分配缓冲、alias 索引、连续相位振荡）。尚未实现 OpenUTAU 级别的真正重采样器 + wavtool 拼接、音素词典、完整 pitch curve 等。
 
 ## 构建
 
