@@ -1,0 +1,17 @@
+[#VERSION]
+UST Version1.2
+[#SETTING]
+Tempo=120
+[#0000]
+Length=480
+Lyric=a
+NoteNum=60
+[#0001]
+Length=480
+Lyric=R
+NoteNum=60
+[#0002]
+Length=480
+Lyric=i
+NoteNum=64
+[#TRACKEND]
