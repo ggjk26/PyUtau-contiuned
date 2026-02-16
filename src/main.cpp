@@ -58,7 +58,7 @@ int main(int argc, char** argv) {
 
         SynthEngine synth;
         RenderOptions options;
-        Pcm16Wave wave = synth.render(project, options);
+        Pcm16Wave wave = synth.render(project, oto_entries, options);
         write_wave_file(wave, out_path.c_str());
 
         std::cout << "Rendered wav: " << out_path << "\n";
