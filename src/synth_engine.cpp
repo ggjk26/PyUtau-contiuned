@@ -42,6 +42,8 @@ struct SynthState {
     double dc_prev_x = 0.0;
     double dc_prev_y = 0.0;
     double tone_lp = 0.0;
+    double freq_smooth = 0.0;
+    double amp_smooth = 0.0;
 };
 
 HarmonicProfile profile_for_lyric(const std::string& lyric) {
@@ -123,6 +125,7 @@ int estimate_total_samples(const UstProject& project, const RenderOptions& optio
 void render_note(Pcm16Wave& wave,
                  const Note& note,
                  const Note* prev_note,
+                 const Note* next_note,
                  int tempo,
                  const std::unordered_map<std::string, const OtoEntry*>& oto_index,
                  const RenderOptions& options,
@@ -172,7 +175,21 @@ void render_note(Pcm16Wave& wave,
         static_cast<int>((0.016 + (140 - std::clamp(note.velocity, 0, 200)) * 0.00018)
                          * options.sample_rate));
 
-    const int release_samples = std::max(8, static_cast<int>(std::min(0.08, duration_sec * 0.4) * options.sample_rate));
+    const bool has_prev_voiced = (prev_note != nullptr && prev_note->lyric != "R");
+    const bool has_next_voiced = (next_note != nullptr && next_note->lyric != "R");
+
+    int effective_attack_samples = attack_samples;
+    if (has_prev_voiced) {
+        // 连音进入时更快贴合，避免头部再次突兀起音。
+        effective_attack_samples = std::max(4, attack_samples / 2);
+    }
+
+    int release_samples = std::max(8, static_cast<int>(std::min(0.08, duration_sec * 0.4) * options.sample_rate));
+    if (has_next_voiced) {
+        // 后面还有发声音符时延长尾部，给连接留空间。
+        release_samples = std::max(release_samples, std::max(12, samples / 3));
+    }
+
     const int glide_samples = std::max(1, static_cast<int>(std::min(0.045, duration_sec * 0.25) * options.sample_rate));
 
     const HarmonicProfile hp = profile_for_lyric(note.lyric);
@@ -194,7 +211,13 @@ void render_note(Pcm16Wave& wave,
             curr_freq *= std::pow(2.0, vib_cents / 1200.0);
         }
 
-        state.phase += kTwoPi * curr_freq / static_cast<double>(options.sample_rate);
+        // 频率一阶平滑，降低音符切换/滑音时的突变感与杂散。
+        if (state.freq_smooth <= 0.0) {
+            state.freq_smooth = curr_freq;
+        }
+        state.freq_smooth = state.freq_smooth * 0.985 + curr_freq * 0.015;
+
+        state.phase += kTwoPi * state.freq_smooth / static_cast<double>(options.sample_rate);
         if (state.phase >= kTwoPi) {
             state.phase = std::fmod(state.phase, kTwoPi);
         }
@@ -222,12 +245,15 @@ void render_note(Pcm16Wave& wave,
 
         double amp = options.master_volume;
         if (options.enable_simple_envelope) {
-            amp *= envelope_value(i, samples, attack_samples, release_samples);
+            amp *= envelope_value(i, samples, effective_attack_samples, release_samples);
         }
+
+        // 振幅去 zipper，进一步平滑音符边界与参数突变。
+        state.amp_smooth = state.amp_smooth * 0.996 + amp * 0.004;
 
         // 轻微音色平滑（一阶低通），提升听感。
         state.tone_lp = state.tone_lp * 0.78 + voiced * 0.22;
-        double y = state.tone_lp * amp;
+        double y = state.tone_lp * state.amp_smooth;
 
         // DC block，避免低频偏置带来的闷和爆。
         const double dc_alpha = 0.995;
@@ -260,7 +286,8 @@ Pcm16Wave SynthEngine::render(const UstProject& project,
     SynthState state;
     for (size_t i = 0; i < project.notes.size(); ++i) {
         const Note* prev = i > 0 ? &project.notes[i - 1] : nullptr;
-        render_note(wave, project.notes[i], prev, project.tempo, oto_index, options, noise, state);
+        const Note* next = i + 1 < project.notes.size() ? &project.notes[i + 1] : nullptr;
+        render_note(wave, project.notes[i], prev, next, project.tempo, oto_index, options, noise, state);
     }
 
     return wave;
