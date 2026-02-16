@@ -10,6 +10,7 @@
 #include <QMainWindow>
 #include <QString>
 #include <unordered_map>
+#include <vector>
 
 QT_BEGIN_NAMESPACE
 class QLabel;
@@ -61,11 +62,13 @@ private:
     [[nodiscard]] static int compareVersion(const VersionToken& lhs, const VersionToken& rhs);
     [[nodiscard]] static std::string detectGitHubRepoFromGitRemote();
     [[nodiscard]] static std::string fetchLatestReleaseTag(const std::string& repo);
+    [[nodiscard]] static std::vector<std::pair<QString, QString>> fetchOpenIssues(const std::string& repo);
     void buildUi();
     void applySynthVInspiredStyle();
     void bindProjectToUi();
     void updateRenderProgress(int current, int total, const QString& stage);
     void updateWindowTitle();
+    void showIssueFeedbackDialog();
 
     pyutau::core::Project m_project;
     pyutau::core::UstParser m_parser;

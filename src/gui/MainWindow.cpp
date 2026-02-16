@@ -4,6 +4,7 @@
 #include <random>
 
 #include <QDialog>
+#include <QDesktopServices>
 #include <QDialogButtonBox>
 #include <QCheckBox>
 #include <QApplication>
@@ -11,11 +12,13 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
+#include <QHBoxLayout>
 #include <QInputDialog>
 #include <QLineEdit>
 #include <QDoubleSpinBox>
 #include <QLabel>
 #include <QListWidget>
+#include <QListWidgetItem>
 #include <QProgressBar>
 #include <QMenuBar>
 #include <QMessageBox>
@@ -27,6 +30,7 @@
 #include <QSplitter>
 #include <QStatusBar>
 #include <QToolBar>
+#include <QUrl>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -693,6 +697,88 @@ std::string MainWindow::fetchLatestReleaseTag(const std::string& repo) {
     return match.captured(1).toStdString();
 }
 
+std::vector<std::pair<QString, QString>> MainWindow::fetchOpenIssues(const std::string& repo) {
+    QProcess process;
+    const auto api = QString("https://api.github.com/repos/%1/issues?state=open&per_page=30").arg(QString::fromStdString(repo));
+    process.start("curl", {"-L", "-s", api});
+    if (!process.waitForFinished(8000)) {
+        return {};
+    }
+
+    const auto json = QString::fromUtf8(process.readAllStandardOutput());
+    std::vector<std::pair<QString, QString>> issues;
+
+    QRegularExpression objectRe(R"(\{[^\{\}]*"title"\s*:\s*"([^"]+)"[^\{\}]*"html_url"\s*:\s*"([^"]+/issues/\d+)"[^\{\}]*\})");
+    auto it = objectRe.globalMatch(json);
+    while (it.hasNext()) {
+        const auto m = it.next();
+        issues.emplace_back(m.captured(1), m.captured(2));
+    }
+
+    return issues;
+}
+
+void MainWindow::showIssueFeedbackDialog() {
+    const auto repo = detectGitHubRepoFromGitRemote();
+    const QString repoText = QString::fromStdString(repo);
+
+    QDialog dialog(this);
+    dialog.setWindowTitle("问题反馈");
+    dialog.resize(720, 520);
+
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* hint = new QLabel(QString("当前仓库：%1\n可查看 GitHub Issues，并跳转创建新 Issue。双击条目可在浏览器打开。").arg(repoText), &dialog);
+    hint->setWordWrap(true);
+
+    auto* issueList = new QListWidget(&dialog);
+
+    auto refreshIssues = [issueList, repo]() {
+        issueList->clear();
+        const auto issues = MainWindow::fetchOpenIssues(repo);
+        if (issues.empty()) {
+            issueList->addItem("未获取到 issue（可能无公开 issue、API 限流或网络异常）。");
+            return;
+        }
+
+        for (const auto& [title, url] : issues) {
+            auto* item = new QListWidgetItem(title, issueList);
+            item->setToolTip(url);
+            item->setData(Qt::UserRole, url);
+        }
+    };
+
+    auto* refreshBtn = new QPushButton("刷新 Issues", &dialog);
+    QObject::connect(refreshBtn, &QPushButton::clicked, &dialog, refreshIssues);
+
+    QObject::connect(issueList, &QListWidget::itemDoubleClicked, &dialog, [](QListWidgetItem* item) {
+        const auto url = item->data(Qt::UserRole).toString();
+        if (!url.isEmpty()) {
+            QDesktopServices::openUrl(QUrl(url));
+        }
+    });
+
+    auto* createBtn = new QPushButton("创建 Issue", &dialog);
+    QObject::connect(createBtn, &QPushButton::clicked, &dialog, [repoText]() {
+        QDesktopServices::openUrl(QUrl(QString("https://github.com/%1/issues/new").arg(repoText)));
+    });
+
+    auto* closeBtn = new QPushButton("关闭", &dialog);
+    QObject::connect(closeBtn, &QPushButton::clicked, &dialog, &QDialog::accept);
+
+    auto* actionRow = new QHBoxLayout();
+    actionRow->addWidget(refreshBtn);
+    actionRow->addWidget(createBtn);
+    actionRow->addStretch(1);
+    actionRow->addWidget(closeBtn);
+
+    layout->addWidget(hint);
+    layout->addWidget(issueList, 1);
+    layout->addLayout(actionRow);
+
+    refreshIssues();
+    dialog.exec();
+}
+
 void MainWindow::showAboutAndUpdates() {
     QDialog dialog(this);
     dialog.setWindowTitle("关于 / 更新");
@@ -707,6 +793,7 @@ void MainWindow::showAboutAndUpdates() {
     log->setPlainText("点击“手动检查更新”从 GitHub Releases 获取最新版本。\n版本顺序：preview < alpha < beta < release。");
 
     auto* checkBtn = new QPushButton("手动检查更新", &dialog);
+    auto* feedbackBtn = new QPushButton("问题反馈", &dialog);
     QObject::connect(checkBtn, &QPushButton::clicked, &dialog, [log]() {
         const auto repo = MainWindow::detectGitHubRepoFromGitRemote();
         const auto latestTag = MainWindow::fetchLatestReleaseTag(repo);
@@ -737,12 +824,15 @@ void MainWindow::showAboutAndUpdates() {
         }
     });
 
+    QObject::connect(feedbackBtn, &QPushButton::clicked, this, &MainWindow::showIssueFeedbackDialog);
+
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
     QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
 
     layout->addWidget(info);
     layout->addWidget(checkBtn);
+    layout->addWidget(feedbackBtn);
     layout->addWidget(log, 1);
     layout->addWidget(buttons);
 
