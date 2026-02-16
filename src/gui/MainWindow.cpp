@@ -1,10 +1,12 @@
 #include "MainWindow.h"
 
 #include <algorithm>
+#include <random>
 
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QFileDialog>
 #include <QFormLayout>
 #include <QInputDialog>
@@ -431,7 +433,47 @@ void MainWindow::exportWav() {
         return;
     }
 
-    const int effectiveSampleRate = m_settings.lowEndDeviceMode ? std::min(m_settings.sampleRate, 32000) : m_settings.sampleRate;
+    QDialog optionDialog(this);
+    optionDialog.setWindowTitle("导出音频选项");
+    auto* optionLayout = new QFormLayout(&optionDialog);
+
+    auto* sampleRateBox = new QComboBox(&optionDialog);
+    sampleRateBox->addItems({"22050", "32000", "44100", "48000"});
+    sampleRateBox->setCurrentText(QString::number(m_settings.lowEndDeviceMode ? std::min(m_settings.sampleRate, 32000) : m_settings.sampleRate));
+
+    auto* bitDepthBox = new QComboBox(&optionDialog);
+    bitDepthBox->addItems({"16", "24", "32"});
+    bitDepthBox->setCurrentText("16");
+
+    auto* channelsBox = new QComboBox(&optionDialog);
+    channelsBox->addItems({"1", "2"});
+    channelsBox->setCurrentText("2");
+
+    auto* breathBox = new QComboBox(&optionDialog);
+    breathBox->addItems({"关闭", "轻", "中", "强"});
+    breathBox->setCurrentIndex(0);
+
+    optionLayout->addRow("采样率 (Hz)", sampleRateBox);
+    optionLayout->addRow("比特率/位深 (bit)", bitDepthBox);
+    optionLayout->addRow("声道数量", channelsBox);
+    optionLayout->addRow("气音", breathBox);
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &optionDialog);
+    optionLayout->addRow(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &optionDialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &optionDialog, &QDialog::reject);
+
+    if (optionDialog.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    int effectiveSampleRate = sampleRateBox->currentText().toInt();
+    if (m_settings.lowEndDeviceMode) {
+        effectiveSampleRate = std::min(effectiveSampleRate, 32000);
+    }
+    const int bitsPerSample = bitDepthBox->currentText().toInt();
+    const int channels = channelsBox->currentText().toInt();
+    const auto breathMode = breathBox->currentText();
     const unsigned int effectiveThreads = m_settings.lowEndDeviceMode ? 1U : m_settings.maxRenderThreads;
 
     std::vector<float> mixdown;
@@ -478,21 +520,46 @@ void MainWindow::exportWav() {
         return;
     }
 
+    // Breath noise layer (simple aspirate simulation).
+    float breathGain = 0.0F;
+    if (breathMode == "轻") {
+        breathGain = 0.008F;
+    } else if (breathMode == "中") {
+        breathGain = 0.015F;
+    } else if (breathMode == "强") {
+        breathGain = 0.025F;
+    }
+
+    if (breathGain > 0.0F) {
+        std::mt19937 rng(42U);
+        std::uniform_real_distribution<float> noiseDist(-1.0F, 1.0F);
+        float last = 0.0F;
+        for (auto& sample : mixdown) {
+            const float white = noiseDist(rng);
+            last = 0.9F * last + 0.1F * white;
+            sample += breathGain * last;
+        }
+    }
+
     for (auto& sample : mixdown) {
         sample = std::clamp(sample * m_settings.masterGain, -1.0F, 1.0F);
     }
 
-    if (!m_audio.exportWav(path.toStdString(), mixdown, effectiveSampleRate)) {
+    if (!m_audio.exportWav(path.toStdString(), mixdown, effectiveSampleRate, bitsPerSample, channels)) {
         QMessageBox::critical(this, "Export", "Failed to write wav file.");
         return;
     }
 
-    m_statusLabel->setText(QString("Exported: %1 | tracks %2 | render %3 ms | workers %4 | lowEnd=%5")
+    const int nominalKbps = effectiveSampleRate * bitsPerSample * channels / 1000;
+    m_statusLabel->setText(QString("Exported: %1 | tracks %2 | %3Hz/%4bit/%5ch (~%6kbps) | breath=%7 | render %8 ms")
                                .arg(path)
                                .arg(usedTracks)
-                               .arg(QString::number(totalRenderMs, 'f', 2))
-                               .arg(totalWorkers)
-                               .arg(m_settings.lowEndDeviceMode ? "ON" : "OFF"));
+                               .arg(effectiveSampleRate)
+                               .arg(bitsPerSample)
+                               .arg(channels)
+                               .arg(nominalKbps)
+                               .arg(breathMode)
+                               .arg(QString::number(totalRenderMs, 'f', 2)));
 }
 
 bool MainWindow::tryParseVersionTag(const std::string& tag, VersionToken& out) {
