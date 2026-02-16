@@ -32,6 +32,7 @@ private slots:
     void addTrack();
     void trackSelectionChanged();
     void exportWav();
+    void showAboutAndUpdates();
 
 private:
     struct AppSettings {
@@ -44,8 +45,19 @@ private:
         double autoVibratoRateHz = 5.5;
     };
 
+    struct VersionToken {
+        int major = 0;
+        int minor = 0;
+        int patch = 0;
+        int stage = 3; // preview(0) < alpha(1) < beta(2) < release(3)
+    };
+
     [[nodiscard]] pyutau::core::Track applyDictionary(const pyutau::core::Track& track) const;
     [[nodiscard]] pyutau::core::Track applyPitchEnhancements(const pyutau::core::Track& track) const;
+    [[nodiscard]] static bool tryParseVersionTag(const std::string& tag, VersionToken& out);
+    [[nodiscard]] static int compareVersion(const VersionToken& lhs, const VersionToken& rhs);
+    [[nodiscard]] static std::string detectGitHubRepoFromGitRemote();
+    [[nodiscard]] static std::string fetchLatestReleaseTag(const std::string& repo);
     void buildUi();
     void bindProjectToUi();
 

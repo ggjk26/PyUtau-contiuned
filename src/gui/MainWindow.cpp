@@ -14,6 +14,10 @@
 #include <QListWidget>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QRegularExpression>
+#include <QProcess>
+#include <QPushButton>
+#include <QPlainTextEdit>
 #include <QSpinBox>
 #include <QSplitter>
 #include <QStatusBar>
@@ -22,6 +26,11 @@
 #include <QWidget>
 
 namespace pyutau::gui {
+
+namespace {
+constexpr const char* kCurrentVersion = "0.1.0-preview";
+constexpr const char* kFallbackGithubRepo = "OpenUtau/PyUtau-contiuned";
+}
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent) {
@@ -476,6 +485,133 @@ void MainWindow::exportWav() {
                                .arg(totalWorkers));
 }
 
+bool MainWindow::tryParseVersionTag(const std::string& tag, VersionToken& out) {
+    QRegularExpression re("^v?(\\d+)\\.(\\d+)\\.(\\d+)(?:[-_]?([A-Za-z]+))?.*$");
+    const auto m = re.match(QString::fromStdString(tag));
+    if (!m.hasMatch()) {
+        return false;
+    }
+
+    out.major = m.captured(1).toInt();
+    out.minor = m.captured(2).toInt();
+    out.patch = m.captured(3).toInt();
+
+    const auto stageText = m.captured(4).toLower();
+    if (stageText == "preview") {
+        out.stage = 0;
+    } else if (stageText == "alpha") {
+        out.stage = 1;
+    } else if (stageText == "beta") {
+        out.stage = 2;
+    } else {
+        out.stage = 3;
+    }
+
+    return true;
+}
+
+int MainWindow::compareVersion(const VersionToken& lhs, const VersionToken& rhs) {
+    if (lhs.major != rhs.major) return lhs.major < rhs.major ? -1 : 1;
+    if (lhs.minor != rhs.minor) return lhs.minor < rhs.minor ? -1 : 1;
+    if (lhs.patch != rhs.patch) return lhs.patch < rhs.patch ? -1 : 1;
+    if (lhs.stage != rhs.stage) return lhs.stage < rhs.stage ? -1 : 1;
+    return 0;
+}
+
+std::string MainWindow::detectGitHubRepoFromGitRemote() {
+    QProcess process;
+    process.start("git", {"config", "--get", "remote.origin.url"});
+    if (!process.waitForFinished(2000)) {
+        return kFallbackGithubRepo;
+    }
+
+    const auto url = QString::fromUtf8(process.readAllStandardOutput()).trimmed();
+    if (url.isEmpty()) {
+        return kFallbackGithubRepo;
+    }
+
+    QRegularExpression httpsRe("github\\.com[:/](.+?/.+?)(?:\\.git)?$");
+    const auto match = httpsRe.match(url);
+    if (match.hasMatch()) {
+        return match.captured(1).toStdString();
+    }
+
+    return kFallbackGithubRepo;
+}
+
+std::string MainWindow::fetchLatestReleaseTag(const std::string& repo) {
+    QProcess process;
+    const auto api = QString("https://api.github.com/repos/%1/releases/latest").arg(QString::fromStdString(repo));
+    process.start("curl", {"-L", "-s", api});
+    if (!process.waitForFinished(8000)) {
+        return {};
+    }
+
+    const auto json = QString::fromUtf8(process.readAllStandardOutput());
+    QRegularExpression tagRe("\"tag_name\"\\s*:\\s*\"([^\"]+)\"");
+    const auto match = tagRe.match(json);
+    if (!match.hasMatch()) {
+        return {};
+    }
+    return match.captured(1).toStdString();
+}
+
+void MainWindow::showAboutAndUpdates() {
+    QDialog dialog(this);
+    dialog.setWindowTitle("关于 / 更新");
+    dialog.resize(620, 420);
+
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* info = new QLabel(QString("<b>PyUtau Continued</b><br/>当前版本：%1").arg(kCurrentVersion), &dialog);
+    info->setTextFormat(Qt::RichText);
+
+    auto* log = new QPlainTextEdit(&dialog);
+    log->setReadOnly(true);
+    log->setPlainText("点击“手动检查更新”从 GitHub Releases 获取最新版本。\n版本顺序：preview < alpha < beta < release。");
+
+    auto* checkBtn = new QPushButton("手动检查更新", &dialog);
+    QObject::connect(checkBtn, &QPushButton::clicked, &dialog, [log]() {
+        const auto repo = MainWindow::detectGitHubRepoFromGitRemote();
+        const auto latestTag = MainWindow::fetchLatestReleaseTag(repo);
+
+        if (latestTag.empty()) {
+            log->appendPlainText("更新检查失败：无法从 GitHub Releases 获取 tag_name。\n请检查网络或仓库 release 设置。");
+            return;
+        }
+
+        MainWindow::VersionToken current{};
+        MainWindow::VersionToken latest{};
+        if (!MainWindow::tryParseVersionTag(kCurrentVersion, current) || !MainWindow::tryParseVersionTag(latestTag, latest)) {
+            log->appendPlainText(QString("版本解析失败。当前=%1, 最新=%2").arg(kCurrentVersion).arg(QString::fromStdString(latestTag)));
+            return;
+        }
+
+        const int cmp = MainWindow::compareVersion(current, latest);
+        log->appendPlainText(QString("仓库：%1\n当前：%2\n最新：%3")
+                                 .arg(QString::fromStdString(repo))
+                                 .arg(kCurrentVersion)
+                                 .arg(QString::fromStdString(latestTag)));
+        if (cmp < 0) {
+            log->appendPlainText("发现新版本，可更新。\n");
+        } else if (cmp == 0) {
+            log->appendPlainText("当前已是最新版本。\n");
+        } else {
+            log->appendPlainText("当前版本高于最新 release（可能为开发版）。\n");
+        }
+    });
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+    QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+
+    layout->addWidget(info);
+    layout->addWidget(checkBtn);
+    layout->addWidget(log, 1);
+    layout->addWidget(buttons);
+
+    dialog.exec();
+}
+
 void MainWindow::buildUi() {
     auto* fileMenu = menuBar()->addMenu("File");
     fileMenu->addAction("Open UST/USTX", this, &MainWindow::openUst);
@@ -485,6 +621,9 @@ void MainWindow::buildUi() {
     fileMenu->addAction("Add Track", this, &MainWindow::addTrack);
     fileMenu->addAction("Export WAV", this, &MainWindow::exportWav);
 
+    auto* helpMenu = menuBar()->addMenu("Help");
+    helpMenu->addAction("About / Updates", this, &MainWindow::showAboutAndUpdates);
+
     auto* toolbar = addToolBar("Transport");
     toolbar->setMovable(false);
     toolbar->addAction("Open UST/USTX", this, &MainWindow::openUst);
@@ -493,6 +632,7 @@ void MainWindow::buildUi() {
     toolbar->addAction("Settings", this, &MainWindow::openSettings);
     toolbar->addAction("Add Track", this, &MainWindow::addTrack);
     toolbar->addAction("Render Mix", this, &MainWindow::exportWav);
+    toolbar->addAction("About/Updates", this, &MainWindow::showAboutAndUpdates);
 
     auto* root = new QWidget(this);
     auto* rootLayout = new QVBoxLayout(root);
