@@ -26,11 +26,21 @@ public:
 private slots:
     void openUst();
     void openVoicebank();
+    void manageVoicebanks();
+    void manageDictionary();
+    void openSettings();
     void addTrack();
     void trackSelectionChanged();
     void exportWav();
 
 private:
+    struct AppSettings {
+        unsigned int maxRenderThreads = 0;
+        float masterGain = 0.95F;
+        int sampleRate = 44100;
+    };
+
+    [[nodiscard]] pyutau::core::Track applyDictionary(const pyutau::core::Track& track) const;
     void buildUi();
     void bindProjectToUi();
 
@@ -40,6 +50,8 @@ private:
     pyutau::audio::AudioEngine m_audio;
 
     std::unordered_map<std::string, pyutau::core::Voicebank> m_voicebankPool;
+    std::unordered_map<std::string, std::string> m_lyricDictionary;
+    AppSettings m_settings;
 
     QLabel* m_statusLabel = nullptr;
     QListWidget* m_trackList = nullptr;

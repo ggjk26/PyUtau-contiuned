@@ -2,12 +2,18 @@
 
 #include <algorithm>
 
-#include <QAction>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QFileDialog>
+#include <QFormLayout>
+#include <QInputDialog>
+#include <QLineEdit>
+#include <QDoubleSpinBox>
 #include <QLabel>
 #include <QListWidget>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QSpinBox>
 #include <QSplitter>
 #include <QStatusBar>
 #include <QToolBar>
@@ -57,34 +63,244 @@ void MainWindow::openUst() {
 }
 
 void MainWindow::openVoicebank() {
-    if (!m_trackList || m_trackList->currentRow() < 0 || m_trackList->currentRow() >= static_cast<int>(m_project.tracks().size())) {
-        QMessageBox::information(this, "Voicebank", "请先选中一个音轨后再加载声库。");
+    manageVoicebanks();
+}
+
+void MainWindow::manageVoicebanks() {
+    const QStringList operations{
+        "添加声库",
+        "移除声库",
+        "分配声库到当前音轨",
+        "查看已加载声库",
+    };
+
+    bool ok = false;
+    const auto action = QInputDialog::getItem(this, "声库管理", "请选择操作", operations, 0, false, &ok);
+    if (!ok || action.isEmpty()) {
         return;
     }
 
-    const auto path = QFileDialog::getExistingDirectory(this, "Select Voicebank Folder");
-    if (path.isEmpty()) {
+    if (action == "添加声库") {
+        const auto path = QFileDialog::getExistingDirectory(this, "Select Voicebank Folder");
+        if (path.isEmpty()) {
+            return;
+        }
+
+        bool nameOk = false;
+        const auto defaultName = QString("VB_%1").arg(m_voicebankPool.size() + 1);
+        auto name = QInputDialog::getText(this, "声库名称", "请输入声库 ID", QLineEdit::Normal, defaultName, &nameOk).trimmed();
+        if (!nameOk || name.isEmpty()) {
+            return;
+        }
+
+        pyutau::core::Voicebank vb;
+        if (!vb.loadFromDirectory(path.toStdString())) {
+            QMessageBox::warning(this, "Voicebank", "oto.ini not found or empty.");
+            return;
+        }
+
+        const auto key = name.toStdString();
+        m_voicebankPool[key] = std::move(vb);
+        m_statusLabel->setText(QString("Voicebank added: %1 (%2 aliases)").arg(name).arg(m_voicebankPool[key].size()));
+        bindProjectToUi();
         return;
     }
 
-    pyutau::core::Voicebank voicebank;
-    if (!voicebank.loadFromDirectory(path.toStdString())) {
-        QMessageBox::warning(this, "Voicebank", "oto.ini not found or empty.");
+    if (action == "移除声库") {
+        if (m_voicebankPool.empty()) {
+            QMessageBox::information(this, "声库管理", "当前没有可移除的声库。");
+            return;
+        }
+
+        QStringList ids;
+        for (const auto& [id, _] : m_voicebankPool) {
+            ids.push_back(QString::fromStdString(id));
+        }
+        ids.sort();
+
+        bool idOk = false;
+        const auto selected = QInputDialog::getItem(this, "移除声库", "选择要移除的声库", ids, 0, false, &idOk);
+        if (!idOk || selected.isEmpty()) {
+            return;
+        }
+
+        m_voicebankPool.erase(selected.toStdString());
+        for (auto& track : m_project.tracks()) {
+            if (track.voicebankId == selected.toStdString()) {
+                track.voicebankId.clear();
+            }
+        }
+
+        bindProjectToUi();
+        m_statusLabel->setText(QString("Voicebank removed: %1").arg(selected));
         return;
     }
 
-    const auto key = path.toStdString();
-    m_voicebankPool[key] = std::move(voicebank);
+    if (action == "分配声库到当前音轨") {
+        if (!m_trackList || m_trackList->currentRow() < 0 || m_trackList->currentRow() >= static_cast<int>(m_project.tracks().size())) {
+            QMessageBox::information(this, "声库管理", "请先选中一个音轨。");
+            return;
+        }
+        if (m_voicebankPool.empty()) {
+            QMessageBox::information(this, "声库管理", "请先添加声库。");
+            return;
+        }
 
-    auto& selectedTrack = m_project.tracks()[static_cast<std::size_t>(m_trackList->currentRow())];
-    selectedTrack.voicebankId = key;
+        QStringList ids;
+        for (const auto& [id, _] : m_voicebankPool) {
+            ids.push_back(QString::fromStdString(id));
+        }
+        ids.sort();
 
-    bindProjectToUi();
+        bool idOk = false;
+        const auto selected = QInputDialog::getItem(this, "分配声库", "选择声库", ids, 0, false, &idOk);
+        if (!idOk || selected.isEmpty()) {
+            return;
+        }
 
-    const auto& assigned = m_voicebankPool[selectedTrack.voicebankId];
-    m_statusLabel->setText(QString("Voicebank assigned to %1: %2 aliases")
-                               .arg(QString::fromStdString(selectedTrack.name))
-                               .arg(assigned.size()));
+        auto& track = m_project.tracks()[static_cast<std::size_t>(m_trackList->currentRow())];
+        track.voicebankId = selected.toStdString();
+        bindProjectToUi();
+        m_statusLabel->setText(QString("Assigned %1 -> %2")
+                                   .arg(selected)
+                                   .arg(QString::fromStdString(track.name)));
+        return;
+    }
+
+    if (action == "查看已加载声库") {
+        if (m_voicebankPool.empty()) {
+            QMessageBox::information(this, "声库管理", "当前没有加载声库。");
+            return;
+        }
+
+        QStringList rows;
+        for (const auto& [id, vb] : m_voicebankPool) {
+            rows.push_back(QString("%1 : %2 aliases").arg(QString::fromStdString(id)).arg(vb.size()));
+        }
+        rows.sort();
+        QMessageBox::information(this, "已加载声库", rows.join("\n"));
+    }
+}
+
+void MainWindow::manageDictionary() {
+    const QStringList operations{
+        "添加/更新词典项",
+        "删除词典项",
+        "查看词典",
+        "清空词典",
+    };
+
+    bool ok = false;
+    const auto action = QInputDialog::getItem(this, "词典管理", "请选择操作", operations, 0, false, &ok);
+    if (!ok || action.isEmpty()) {
+        return;
+    }
+
+    if (action == "添加/更新词典项") {
+        bool fromOk = false;
+        const auto from = QInputDialog::getText(this, "词典管理", "输入原歌词", QLineEdit::Normal, {}, &fromOk).trimmed();
+        if (!fromOk || from.isEmpty()) {
+            return;
+        }
+
+        bool toOk = false;
+        const auto to = QInputDialog::getText(this, "词典管理", "输入替换歌词", QLineEdit::Normal, from, &toOk).trimmed();
+        if (!toOk || to.isEmpty()) {
+            return;
+        }
+
+        m_lyricDictionary[from.toStdString()] = to.toStdString();
+        m_statusLabel->setText(QString("Dictionary updated: %1 -> %2").arg(from).arg(to));
+        return;
+    }
+
+    if (action == "删除词典项") {
+        if (m_lyricDictionary.empty()) {
+            QMessageBox::information(this, "词典管理", "词典为空。");
+            return;
+        }
+
+        QStringList keys;
+        for (const auto& [k, _] : m_lyricDictionary) {
+            keys.push_back(QString::fromStdString(k));
+        }
+        keys.sort();
+
+        bool keyOk = false;
+        const auto key = QInputDialog::getItem(this, "删除词典项", "选择原歌词", keys, 0, false, &keyOk);
+        if (!keyOk || key.isEmpty()) {
+            return;
+        }
+
+        m_lyricDictionary.erase(key.toStdString());
+        m_statusLabel->setText(QString("Dictionary entry removed: %1").arg(key));
+        return;
+    }
+
+    if (action == "查看词典") {
+        if (m_lyricDictionary.empty()) {
+            QMessageBox::information(this, "词典管理", "词典为空。");
+            return;
+        }
+
+        QStringList rows;
+        for (const auto& [from, to] : m_lyricDictionary) {
+            rows.push_back(QString("%1 -> %2").arg(QString::fromStdString(from)).arg(QString::fromStdString(to)));
+        }
+        rows.sort();
+        QMessageBox::information(this, "词典项", rows.join("\n"));
+        return;
+    }
+
+    if (action == "清空词典") {
+        m_lyricDictionary.clear();
+        m_statusLabel->setText("Dictionary cleared");
+    }
+}
+
+void MainWindow::openSettings() {
+    QDialog dialog(this);
+    dialog.setWindowTitle("Settings");
+
+    auto* layout = new QFormLayout(&dialog);
+
+    auto* threadSpin = new QSpinBox(&dialog);
+    threadSpin->setRange(0, 128);
+    threadSpin->setValue(static_cast<int>(m_settings.maxRenderThreads));
+    threadSpin->setSpecialValueText("Auto");
+
+    auto* gainSpin = new QDoubleSpinBox(&dialog);
+    gainSpin->setRange(0.0, 2.0);
+    gainSpin->setDecimals(2);
+    gainSpin->setSingleStep(0.05);
+    gainSpin->setValue(m_settings.masterGain);
+
+    auto* sampleRateSpin = new QSpinBox(&dialog);
+    sampleRateSpin->setRange(8000, 192000);
+    sampleRateSpin->setSingleStep(1000);
+    sampleRateSpin->setValue(m_settings.sampleRate);
+
+    layout->addRow("Render Threads (0=Auto)", threadSpin);
+    layout->addRow("Master Gain", gainSpin);
+    layout->addRow("Sample Rate", sampleRateSpin);
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    layout->addRow(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    m_settings.maxRenderThreads = static_cast<unsigned int>(threadSpin->value());
+    m_settings.masterGain = static_cast<float>(gainSpin->value());
+    m_settings.sampleRate = sampleRateSpin->value();
+
+    m_statusLabel->setText(QString("Settings saved | threads=%1 masterGain=%2 sampleRate=%3")
+                               .arg(m_settings.maxRenderThreads)
+                               .arg(QString::number(m_settings.masterGain, 'f', 2))
+                               .arg(m_settings.sampleRate));
 }
 
 void MainWindow::addTrack() {
@@ -110,6 +326,17 @@ void MainWindow::trackSelectionChanged() {
     }
 
     m_pianoRoll->setTrack(&m_project.tracks()[static_cast<std::size_t>(idx)]);
+}
+
+pyutau::core::Track MainWindow::applyDictionary(const pyutau::core::Track& track) const {
+    auto replaced = track;
+    for (auto& note : replaced.notes) {
+        const auto found = m_lyricDictionary.find(note.lyric);
+        if (found != m_lyricDictionary.end()) {
+            note.lyric = found->second;
+        }
+    }
+    return replaced;
 }
 
 void MainWindow::exportWav() {
@@ -142,7 +369,8 @@ void MainWindow::exportWav() {
             }
         }
 
-        auto rendered = m_resampler.renderTrack(track, *vb);
+        const auto mappedTrack = applyDictionary(track);
+        auto rendered = m_resampler.renderTrack(mappedTrack, *vb, m_settings.sampleRate, m_settings.maxRenderThreads);
         if (rendered.pcm.empty()) {
             continue;
         }
@@ -166,10 +394,10 @@ void MainWindow::exportWav() {
     }
 
     for (auto& sample : mixdown) {
-        sample = std::clamp(sample, -1.0F, 1.0F);
+        sample = std::clamp(sample * m_settings.masterGain, -1.0F, 1.0F);
     }
 
-    if (!m_audio.exportWav(path.toStdString(), mixdown)) {
+    if (!m_audio.exportWav(path.toStdString(), mixdown, m_settings.sampleRate)) {
         QMessageBox::critical(this, "Export", "Failed to write wav file.");
         return;
     }
@@ -184,14 +412,18 @@ void MainWindow::exportWav() {
 void MainWindow::buildUi() {
     auto* fileMenu = menuBar()->addMenu("File");
     fileMenu->addAction("Open UST", this, &MainWindow::openUst);
-    fileMenu->addAction("Load Voicebank to Selected Track", this, &MainWindow::openVoicebank);
+    fileMenu->addAction("Voicebank Manager", this, &MainWindow::manageVoicebanks);
+    fileMenu->addAction("Dictionary", this, &MainWindow::manageDictionary);
+    fileMenu->addAction("Settings", this, &MainWindow::openSettings);
     fileMenu->addAction("Add Track", this, &MainWindow::addTrack);
     fileMenu->addAction("Export WAV", this, &MainWindow::exportWav);
 
     auto* toolbar = addToolBar("Transport");
     toolbar->setMovable(false);
     toolbar->addAction("Open UST", this, &MainWindow::openUst);
-    toolbar->addAction("Assign Voicebank", this, &MainWindow::openVoicebank);
+    toolbar->addAction("Voicebank", this, &MainWindow::openVoicebank);
+    toolbar->addAction("Dictionary", this, &MainWindow::manageDictionary);
+    toolbar->addAction("Settings", this, &MainWindow::openSettings);
     toolbar->addAction("Add Track", this, &MainWindow::addTrack);
     toolbar->addAction("Render Mix", this, &MainWindow::exportWav);
 
@@ -200,15 +432,15 @@ void MainWindow::buildUi() {
     auto* splitter = new QSplitter(Qt::Horizontal, root);
 
     m_trackList = new QListWidget(splitter);
-    m_trackList->setMinimumWidth(280);
+    m_trackList->setMinimumWidth(320);
     connect(m_trackList, &QListWidget::currentRowChanged, this, &MainWindow::trackSelectionChanged);
 
     m_pianoRoll = new PianoRollWidget(splitter);
 
     auto* inspector = new QWidget(splitter);
-    inspector->setMinimumWidth(280);
+    inspector->setMinimumWidth(300);
     auto* inspectorLayout = new QVBoxLayout(inspector);
-    inspectorLayout->addWidget(new QLabel("类似 Synthesizer V 的 Inspector 占位区\n（可扩展：轨道静音/独奏/声库选择/增益）", inspector));
+    inspectorLayout->addWidget(new QLabel("Inspector 占位区\n- 轨道参数\n- 声库管理入口\n- 词典映射状态", inspector));
     inspectorLayout->addStretch(1);
 
     splitter->addWidget(m_trackList);
