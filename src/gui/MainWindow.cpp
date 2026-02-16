@@ -49,7 +49,7 @@ MainWindow::MainWindow(QWidget* parent)
 }
 
 void MainWindow::openUst() {
-    const auto path = QFileDialog::getOpenFileName(this, "Open UST", {}, "UST files (*.ust)");
+    const auto path = QFileDialog::getOpenFileName(this, "Open UST / USTX", {}, "UTAU project files (*.ust *.ustx)");
     if (path.isEmpty()) {
         return;
     }
@@ -57,7 +57,7 @@ void MainWindow::openUst() {
     try {
         m_project = m_parser.parse(path.toStdString());
         bindProjectToUi();
-        m_statusLabel->setText(QString("Loaded UST: %1").arg(path));
+        m_statusLabel->setText(QString("Loaded Project: %1").arg(path));
     } catch (const std::exception& ex) {
         QMessageBox::critical(this, "Load failed", ex.what());
     }
@@ -424,7 +424,7 @@ void MainWindow::exportWav() {
 
 void MainWindow::buildUi() {
     auto* fileMenu = menuBar()->addMenu("File");
-    fileMenu->addAction("Open UST", this, &MainWindow::openUst);
+    fileMenu->addAction("Open UST/USTX", this, &MainWindow::openUst);
     fileMenu->addAction("Voicebank Manager", this, &MainWindow::manageVoicebanks);
     fileMenu->addAction("Dictionary", this, &MainWindow::manageDictionary);
     fileMenu->addAction("Settings", this, &MainWindow::openSettings);
@@ -433,7 +433,7 @@ void MainWindow::buildUi() {
 
     auto* toolbar = addToolBar("Transport");
     toolbar->setMovable(false);
-    toolbar->addAction("Open UST", this, &MainWindow::openUst);
+    toolbar->addAction("Open UST/USTX", this, &MainWindow::openUst);
     toolbar->addAction("Voicebank", this, &MainWindow::openVoicebank);
     toolbar->addAction("Dictionary", this, &MainWindow::manageDictionary);
     toolbar->addAction("Settings", this, &MainWindow::openSettings);

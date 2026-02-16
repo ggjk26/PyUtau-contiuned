@@ -3,7 +3,7 @@
 这是一个“从 0 到 1”的 C++ UTAU 底层原型，目标是先搭起可扩展架构：
 
 - `core/Project`：工程数据结构（音符、轨道、速度），支持多音轨参数（轨道增益、静音、独立声库 ID）。
-- `core/UstParser`：读取基础 UST 字段。
+- `core/UstParser`：读取基础 UST 字段，并支持 OpenUTAU 的 USTX 工程文件载入（基础轨道/音符字段）。
 - `core/Voicebank`：读取 `oto.ini`。
 - `core/Resampler`：多线程占位渲染实现（按音符分发到多个 worker，最后混音），后续可替换为真正的 UTAU/OpenUTAU 兼容渲染链。
 - `audio/AudioEngine`：导出 PCM 到 WAV。
