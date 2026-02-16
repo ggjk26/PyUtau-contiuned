@@ -23,9 +23,20 @@ struct VoicebankAiTrainingReport {
     double elapsedMs = 0.0;
 };
 
+struct OpenUtauSyncReport {
+    bool ok = false;
+    bool synced = false;
+    std::string singerName;
+    std::string author;
+    std::size_t otoFileCount = 0;
+    std::size_t aliasCount = 0;
+};
+
 class Voicebank {
 public:
     bool loadFromDirectory(const std::filesystem::path& path);
+    [[nodiscard]] OpenUtauSyncReport loadFromDirectoryWithOpenUtauSync(const std::filesystem::path& path);
+
     [[nodiscard]] const OtoEntry* lookup(const std::string& lyric) const;
     [[nodiscard]] std::size_t size() const;
 

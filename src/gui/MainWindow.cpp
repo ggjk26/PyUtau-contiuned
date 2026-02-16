@@ -69,7 +69,8 @@ void MainWindow::openVoicebank() {
 
 void MainWindow::manageVoicebanks() {
     const QStringList operations{
-        "添加声库",
+        "添加声库（基础）",
+        "添加声库（与OpenUTAU同步）",
         "移除声库",
         "分配声库到当前音轨",
         "查看已加载声库",
@@ -81,7 +82,7 @@ void MainWindow::manageVoicebanks() {
         return;
     }
 
-    if (action == "添加声库") {
+    if (action == "添加声库（基础）" || action == "添加声库（与OpenUTAU同步）") {
         const auto path = QFileDialog::getExistingDirectory(this, "Select Voicebank Folder");
         if (path.isEmpty()) {
             return;
@@ -95,7 +96,16 @@ void MainWindow::manageVoicebanks() {
         }
 
         pyutau::core::Voicebank vb;
-        if (!vb.loadFromDirectory(path.toStdString())) {
+        pyutau::core::OpenUtauSyncReport syncReport;
+
+        const bool openUtauSync = (action == "添加声库（与OpenUTAU同步）");
+        if (openUtauSync) {
+            syncReport = vb.loadFromDirectoryWithOpenUtauSync(path.toStdString());
+            if (!syncReport.ok) {
+                QMessageBox::warning(this, "Voicebank", "OpenUTAU singer import failed (no valid oto aliases found).");
+                return;
+            }
+        } else if (!vb.loadFromDirectory(path.toStdString())) {
             QMessageBox::warning(this, "Voicebank", "oto.ini not found or empty.");
             return;
         }
@@ -104,11 +114,22 @@ void MainWindow::manageVoicebanks() {
         m_voicebankPool[key] = std::move(vb);
 
         const auto report = m_voicebankPool[key].runAiPostProcessAndRetrain(m_settings.enableVoicebankAiRetrain);
-        m_statusLabel->setText(QString("Voicebank added: %1 (%2 aliases) | AI retrain=%3 generated=%4")
-                                   .arg(name)
-                                   .arg(m_voicebankPool[key].size())
-                                   .arg(report.enabled ? "ON" : "OFF")
-                                   .arg(report.generatedAliases));
+        if (openUtauSync) {
+            const auto singerName = syncReport.singerName.empty() ? QString("(unknown)") : QString::fromStdString(syncReport.singerName);
+            m_statusLabel->setText(QString("Voicebank synced: %1 | singer=%2 | otoFiles=%3 aliases=%4 | AI=%5 generated=%6")
+                                       .arg(name)
+                                       .arg(singerName)
+                                       .arg(syncReport.otoFileCount)
+                                       .arg(m_voicebankPool[key].size())
+                                       .arg(report.enabled ? "ON" : "OFF")
+                                       .arg(report.generatedAliases));
+        } else {
+            m_statusLabel->setText(QString("Voicebank added: %1 (%2 aliases) | AI retrain=%3 generated=%4")
+                                       .arg(name)
+                                       .arg(m_voicebankPool[key].size())
+                                       .arg(report.enabled ? "ON" : "OFF")
+                                       .arg(report.generatedAliases));
+        }
         bindProjectToUi();
         return;
     }

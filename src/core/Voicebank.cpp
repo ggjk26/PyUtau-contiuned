@@ -26,12 +26,8 @@ std::string toLowerAscii(std::string value) {
     return value;
 }
 
-} // namespace
-
-bool Voicebank::loadFromDirectory(const std::filesystem::path& path) {
-    m_dictionary.clear();
-
-    const auto otoPath = path / "oto.ini";
+bool parseOtoFile(const std::filesystem::path& otoPath,
+                  std::unordered_map<std::string, OtoEntry>& dictionary) {
     std::ifstream input(otoPath);
     if (!input.is_open()) {
         return false;
@@ -65,11 +61,81 @@ bool Voicebank::loadFromDirectory(const std::filesystem::path& path) {
         entry.overlapMs = std::stod(segment.empty() ? "0" : segment);
 
         if (!entry.alias.empty()) {
-            m_dictionary[entry.alias] = entry;
+            dictionary[entry.alias] = entry;
         }
     }
 
-    return !m_dictionary.empty();
+    return true;
+}
+
+std::string readYamlValue(const std::filesystem::path& yamlPath, const std::string& key) {
+    std::ifstream input(yamlPath);
+    if (!input.is_open()) {
+        return {};
+    }
+
+    std::string line;
+    const std::string marker = key + ":";
+    while (std::getline(input, line)) {
+        const auto trimmed = trim(line);
+        if (!trimmed.starts_with(marker)) {
+            continue;
+        }
+        auto value = trim(trimmed.substr(marker.size()));
+        if (!value.empty() && (value.front() == '"' || value.front() == '\'')) {
+            value.erase(value.begin());
+        }
+        if (!value.empty() && (value.back() == '"' || value.back() == '\'')) {
+            value.pop_back();
+        }
+        return value;
+    }
+
+    return {};
+}
+
+} // namespace
+
+bool Voicebank::loadFromDirectory(const std::filesystem::path& path) {
+    m_dictionary.clear();
+    return parseOtoFile(path / "oto.ini", m_dictionary) && !m_dictionary.empty();
+}
+
+OpenUtauSyncReport Voicebank::loadFromDirectoryWithOpenUtauSync(const std::filesystem::path& path) {
+    m_dictionary.clear();
+
+    OpenUtauSyncReport report;
+    report.synced = true;
+    report.singerName = readYamlValue(path / "character.yaml", "name");
+    report.author = readYamlValue(path / "character.yaml", "author");
+
+    std::size_t parsedOtoFiles = 0;
+    const auto rootOto = path / "oto.ini";
+    if (std::filesystem::exists(rootOto)) {
+        if (parseOtoFile(rootOto, m_dictionary)) {
+            ++parsedOtoFiles;
+        }
+    }
+
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(path)) {
+        if (!entry.is_regular_file()) {
+            continue;
+        }
+        if (toLowerAscii(entry.path().filename().string()) != "oto.ini") {
+            continue;
+        }
+        if (entry.path() == rootOto) {
+            continue;
+        }
+        if (parseOtoFile(entry.path(), m_dictionary)) {
+            ++parsedOtoFiles;
+        }
+    }
+
+    report.otoFileCount = parsedOtoFiles;
+    report.aliasCount = m_dictionary.size();
+    report.ok = !m_dictionary.empty();
+    return report;
 }
 
 const OtoEntry* Voicebank::lookup(const std::string& lyric) const {
