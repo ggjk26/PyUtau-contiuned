@@ -9,6 +9,7 @@
 #include <QApplication>
 #include <QComboBox>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QFormLayout>
 #include <QInputDialog>
 #include <QLineEdit>
@@ -38,7 +39,7 @@ constexpr const char* kFallbackGithubRepo = "OpenUtau/PyUtau-contiuned";
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent) {
-    setWindowTitle("PyUtau Continued - SynthV-Style Prototype");
+    updateWindowTitle();
     resize(1400, 900);
 
     buildUi();
@@ -62,6 +63,10 @@ MainWindow::MainWindow(QWidget* parent)
     bindProjectToUi();
 }
 
+void MainWindow::updateWindowTitle() {
+    setWindowTitle(QString("PyUTAU Continued - %1").arg(m_projectFileName));
+}
+
 void MainWindow::openUst() {
     const auto path = QFileDialog::getOpenFileName(this, "Open UST / USTX", {}, "UTAU project files (*.ust *.ustx)");
     if (path.isEmpty()) {
@@ -70,6 +75,11 @@ void MainWindow::openUst() {
 
     try {
         m_project = m_parser.parse(path.toStdString());
+        m_projectFileName = QFileInfo(path).fileName();
+        if (m_projectFileName.isEmpty()) {
+            m_projectFileName = "未命名";
+        }
+        updateWindowTitle();
         bindProjectToUi();
         m_statusLabel->setText(QString("Loaded Project: %1").arg(path));
     } catch (const std::exception& ex) {

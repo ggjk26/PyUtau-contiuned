@@ -8,6 +8,7 @@
 #include "gui/PianoRollWidget.h"
 
 #include <QMainWindow>
+#include <QString>
 #include <unordered_map>
 
 QT_BEGIN_NAMESPACE
@@ -64,6 +65,7 @@ private:
     void applySynthVInspiredStyle();
     void bindProjectToUi();
     void updateRenderProgress(int current, int total, const QString& stage);
+    void updateWindowTitle();
 
     pyutau::core::Project m_project;
     pyutau::core::UstParser m_parser;
@@ -73,6 +75,7 @@ private:
     std::unordered_map<std::string, pyutau::core::Voicebank> m_voicebankPool;
     std::unordered_map<std::string, std::string> m_lyricDictionary;
     AppSettings m_settings;
+    QString m_projectFileName = "未命名";
 
     QLabel* m_statusLabel = nullptr;
     QProgressBar* m_renderProgress = nullptr;
