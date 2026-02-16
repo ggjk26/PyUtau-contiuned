@@ -6,6 +6,7 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QCheckBox>
+#include <QApplication>
 #include <QComboBox>
 #include <QFileDialog>
 #include <QFormLayout>
@@ -14,6 +15,7 @@
 #include <QDoubleSpinBox>
 #include <QLabel>
 #include <QListWidget>
+#include <QProgressBar>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QRegularExpression>
@@ -36,10 +38,11 @@ constexpr const char* kFallbackGithubRepo = "OpenUtau/PyUtau-contiuned";
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent) {
-    setWindowTitle("PyUtau Continued - C++ Prototype");
+    setWindowTitle("PyUtau Continued - SynthV-Style Prototype");
     resize(1400, 900);
 
     buildUi();
+    applySynthVInspiredStyle();
 
     auto& lead = m_project.createTrack("Vocal #1");
     lead.notes = {
@@ -422,6 +425,25 @@ pyutau::core::Track MainWindow::applyPitchEnhancements(const pyutau::core::Track
     return enhanced;
 }
 
+void MainWindow::updateRenderProgress(int current, int total, const QString& stage) {
+    if (!m_renderProgress) {
+        return;
+    }
+
+    if (total <= 0) {
+        m_renderProgress->setRange(0, 1);
+        m_renderProgress->setValue(0);
+        m_renderProgress->setFormat(stage + " %p%");
+    } else {
+        m_renderProgress->setRange(0, total);
+        m_renderProgress->setValue(std::clamp(current, 0, total));
+        m_renderProgress->setFormat(stage + " %p%");
+    }
+
+    statusBar()->showMessage(stage, 1000);
+    qApp->processEvents();
+}
+
 void MainWindow::exportWav() {
     if (m_project.tracks().empty()) {
         QMessageBox::information(this, "Export", "No tracks available.");
@@ -478,8 +500,20 @@ void MainWindow::exportWav() {
 
     std::vector<float> mixdown;
     std::size_t usedTracks = 0;
+    int progressStep = 0;
     std::size_t totalWorkers = 0;
     double totalRenderMs = 0.0;
+
+    int activeTrackCount = 0;
+    for (const auto& track : m_project.tracks()) {
+        if (!track.muted) {
+            ++activeTrackCount;
+        }
+    }
+
+    constexpr int postStages = 3;
+    const int totalStages = std::max(1, activeTrackCount + postStages);
+    updateRenderProgress(0, totalStages, "Preparing export");
 
     for (const auto& track : m_project.tracks()) {
         if (track.muted) {
@@ -513,12 +547,19 @@ void MainWindow::exportWav() {
         ++usedTracks;
         totalWorkers += rendered.workerThreads;
         totalRenderMs += rendered.elapsedMs;
+        ++progressStep;
+        updateRenderProgress(progressStep, totalStages, QString("Rendering tracks (%1/%2)").arg(progressStep).arg(activeTrackCount));
     }
 
     if (usedTracks == 0) {
+        m_renderProgress->setValue(0);
+        m_renderProgress->setFormat("Ready");
         QMessageBox::warning(this, "Export", "没有可导出的有效音轨（音轨可能为空或全部静音）。");
         return;
     }
+
+    ++progressStep;
+    updateRenderProgress(progressStep, totalStages, "Applying post effects");
 
     // Breath noise layer (simple aspirate simulation).
     float breathGain = 0.0F;
@@ -541,14 +582,23 @@ void MainWindow::exportWav() {
         }
     }
 
+    ++progressStep;
+    updateRenderProgress(progressStep, totalStages, "Final limiting");
     for (auto& sample : mixdown) {
         sample = std::clamp(sample * m_settings.masterGain, -1.0F, 1.0F);
     }
 
+    ++progressStep;
+    updateRenderProgress(progressStep, totalStages, "Writing WAV");
     if (!m_audio.exportWav(path.toStdString(), mixdown, effectiveSampleRate, bitsPerSample, channels)) {
+        m_renderProgress->setValue(0);
+        m_renderProgress->setFormat("Ready");
         QMessageBox::critical(this, "Export", "Failed to write wav file.");
         return;
     }
+
+    m_renderProgress->setValue(totalStages);
+    m_renderProgress->setFormat("Ready");
 
     const int nominalKbps = effectiveSampleRate * bitsPerSample * channels / 1000;
     m_statusLabel->setText(QString("Exported: %1 | tracks %2 | %3Hz/%4bit/%5ch (~%6kbps) | breath=%7 | render %8 ms")
@@ -689,6 +739,26 @@ void MainWindow::showAboutAndUpdates() {
     dialog.exec();
 }
 
+void MainWindow::applySynthVInspiredStyle() {
+    const QString style = R"(
+QMainWindow { background: #1a1c22; color: #d7dce6; }
+QMenuBar { background: #232733; color: #d7dce6; }
+QMenuBar::item:selected { background: #3a4154; }
+QMenu { background: #232733; color: #d7dce6; border: 1px solid #3a4154; }
+QMenu::item:selected { background: #3a4154; }
+QToolBar { background: #20242f; border-bottom: 1px solid #3a4154; spacing: 4px; }
+QToolButton { background: #2d3342; color: #e2e7f0; border: 1px solid #444d65; border-radius: 4px; padding: 4px 8px; }
+QToolButton:hover { background: #3b4358; }
+QListWidget { background: #151821; color: #d7dce6; border: 1px solid #3a4154; }
+QListWidget::item:selected { background: #4d6aa8; color: #ffffff; }
+QStatusBar { background: #1f2330; color: #d7dce6; }
+QLabel { color: #d7dce6; }
+QProgressBar { background: #11141c; border: 1px solid #3b4358; border-radius: 4px; text-align: center; color: #d7dce6; min-width: 220px; }
+QProgressBar::chunk { background-color: #5c83d6; }
+)";
+    setStyleSheet(style);
+}
+
 void MainWindow::buildUi() {
     auto* fileMenu = menuBar()->addMenu("File");
     fileMenu->addAction("Open UST/USTX", this, &MainWindow::openUst);
@@ -736,7 +806,12 @@ void MainWindow::buildUi() {
     setCentralWidget(root);
 
     m_statusLabel = new QLabel("Ready", this);
+    m_renderProgress = new QProgressBar(this);
+    m_renderProgress->setRange(0, 100);
+    m_renderProgress->setValue(0);
+    m_renderProgress->setFormat("Ready");
     statusBar()->addWidget(m_statusLabel, 1);
+    statusBar()->addPermanentWidget(m_renderProgress);
 }
 
 void MainWindow::bindProjectToUi() {

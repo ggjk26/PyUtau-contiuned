@@ -13,6 +13,7 @@
 QT_BEGIN_NAMESPACE
 class QLabel;
 class QListWidget;
+class QProgressBar;
 QT_END_NAMESPACE
 
 namespace pyutau::gui {
@@ -60,7 +61,9 @@ private:
     [[nodiscard]] static std::string detectGitHubRepoFromGitRemote();
     [[nodiscard]] static std::string fetchLatestReleaseTag(const std::string& repo);
     void buildUi();
+    void applySynthVInspiredStyle();
     void bindProjectToUi();
+    void updateRenderProgress(int current, int total, const QString& stage);
 
     pyutau::core::Project m_project;
     pyutau::core::UstParser m_parser;
@@ -72,6 +75,7 @@ private:
     AppSettings m_settings;
 
     QLabel* m_statusLabel = nullptr;
+    QProgressBar* m_renderProgress = nullptr;
     QListWidget* m_trackList = nullptr;
     PianoRollWidget* m_pianoRoll = nullptr;
 };
