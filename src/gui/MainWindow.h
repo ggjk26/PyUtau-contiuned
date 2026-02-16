@@ -8,6 +8,7 @@
 #include "gui/PianoRollWidget.h"
 
 #include <QMainWindow>
+#include <unordered_map>
 
 QT_BEGIN_NAMESPACE
 class QLabel;
@@ -25,6 +26,8 @@ public:
 private slots:
     void openUst();
     void openVoicebank();
+    void addTrack();
+    void trackSelectionChanged();
     void exportWav();
 
 private:
@@ -32,10 +35,11 @@ private:
     void bindProjectToUi();
 
     pyutau::core::Project m_project;
-    pyutau::core::Voicebank m_voicebank;
     pyutau::core::UstParser m_parser;
     pyutau::core::Resampler m_resampler;
     pyutau::audio::AudioEngine m_audio;
+
+    std::unordered_map<std::string, pyutau::core::Voicebank> m_voicebankPool;
 
     QLabel* m_statusLabel = nullptr;
     QListWidget* m_trackList = nullptr;

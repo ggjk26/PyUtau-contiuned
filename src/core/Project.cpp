@@ -33,7 +33,7 @@ const std::vector<TempoPoint>& Project::tempoMap() const {
 }
 
 Track& Project::createTrack(std::string name) {
-    m_tracks.push_back({.name = std::move(name), .notes = {}});
+    m_tracks.push_back({.name = std::move(name), .voicebankId = {}, .gain = 1.0F, .muted = false, .notes = {}});
     return m_tracks.back();
 }
 

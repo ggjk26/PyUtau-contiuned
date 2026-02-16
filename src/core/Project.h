@@ -22,6 +22,9 @@ struct TempoPoint {
 
 struct Track {
     std::string name = "Track";
+    std::string voicebankId;
+    float gain = 1.0F;
+    bool muted = false;
     std::vector<Note> notes;
 };
 
