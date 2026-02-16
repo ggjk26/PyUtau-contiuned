@@ -16,7 +16,7 @@ cmake -S . -B build
 cmake --build build
 ```
 
-> 依赖：Qt6 Widgets。
+> 依赖：Qt6 Widgets。Windows/MSVC 构建默认使用 Microsoft C++ 运行库（DLL 运行时）。
 
 ## 性能优化（当前版本）
 
@@ -27,7 +27,7 @@ cmake --build build
 
 ## 界面与工作流完善（当前版本）
 
-- **设置（Settings）**：支持设置渲染线程数、主输出增益和采样率，并可开启“导入声库后 AI 重训练”。
+- **设置（Settings）**：支持设置渲染线程数、主输出增益和采样率，并可开启“导入声库后 AI 重训练”；新增“低端设备模式”以降低线程和采样率开销。
 - **关于/更新（About / Updates）**：在同一界面中支持手动检查更新（从 GitHub Releases 获取最新版本并与当前版本号比对）。
 - **自动音高线增强**：支持自动 pitch line（起音下滑 + 渐入颤音）与手动音高点叠加，渲染与钢琴卷帘均可看到效果。
 - **声库管理（Voicebank Manager）**：支持添加/移除/查看声库，并将声库分配给当前选中音轨；支持“与 OpenUTAU 同步”导入（递归读取 singer 目录下多个 `oto.ini`，解析 `character.yaml` 基本信息）；开启 AI 重训练后会在导入时执行后处理。

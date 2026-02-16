@@ -333,6 +333,9 @@ void MainWindow::openSettings() {
     vibratoRateSpin->setSingleStep(0.1);
     vibratoRateSpin->setValue(m_settings.autoVibratoRateHz);
 
+    auto* lowEndCheck = new QCheckBox("Low-end device mode (lower CPU/memory)", &dialog);
+    lowEndCheck->setChecked(m_settings.lowEndDeviceMode);
+
     layout->addRow("Render Threads (0=Auto)", threadSpin);
     layout->addRow("Master Gain", gainSpin);
     layout->addRow("Sample Rate", sampleRateSpin);
@@ -340,6 +343,7 @@ void MainWindow::openSettings() {
     layout->addRow("Pitch", autoPitchCheck);
     layout->addRow("Vibrato Depth (cents)", vibratoDepthSpin);
     layout->addRow("Vibrato Rate (Hz)", vibratoRateSpin);
+    layout->addRow("Performance", lowEndCheck);
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
     layout->addRow(buttons);
@@ -357,15 +361,17 @@ void MainWindow::openSettings() {
     m_settings.enableAutoPitchLine = autoPitchCheck->isChecked();
     m_settings.autoVibratoDepthCents = vibratoDepthSpin->value();
     m_settings.autoVibratoRateHz = vibratoRateSpin->value();
+    m_settings.lowEndDeviceMode = lowEndCheck->isChecked();
 
-    m_statusLabel->setText(QString("Settings saved | threads=%1 masterGain=%2 sampleRate=%3 aiRetrain=%4 autoPitch=%5 vib=%6c/%7Hz")
+    m_statusLabel->setText(QString("Settings saved | threads=%1 masterGain=%2 sampleRate=%3 aiRetrain=%4 autoPitch=%5 vib=%6c/%7Hz lowEnd=%8")
                                .arg(m_settings.maxRenderThreads)
                                .arg(QString::number(m_settings.masterGain, 'f', 2))
                                .arg(m_settings.sampleRate)
                                .arg(m_settings.enableVoicebankAiRetrain ? "ON" : "OFF")
                                .arg(m_settings.enableAutoPitchLine ? "ON" : "OFF")
                                .arg(m_settings.autoVibratoDepthCents)
-                               .arg(QString::number(m_settings.autoVibratoRateHz, 'f', 2)));
+                               .arg(QString::number(m_settings.autoVibratoRateHz, 'f', 2))
+                               .arg(m_settings.lowEndDeviceMode ? "ON" : "OFF"));
 }
 
 void MainWindow::addTrack() {
@@ -425,6 +431,9 @@ void MainWindow::exportWav() {
         return;
     }
 
+    const int effectiveSampleRate = m_settings.lowEndDeviceMode ? std::min(m_settings.sampleRate, 32000) : m_settings.sampleRate;
+    const unsigned int effectiveThreads = m_settings.lowEndDeviceMode ? 1U : m_settings.maxRenderThreads;
+
     std::vector<float> mixdown;
     std::size_t usedTracks = 0;
     std::size_t totalWorkers = 0;
@@ -446,7 +455,7 @@ void MainWindow::exportWav() {
 
         const auto mappedTrack = applyDictionary(track);
         const auto pitchedTrack = applyPitchEnhancements(mappedTrack);
-        auto rendered = m_resampler.renderTrack(pitchedTrack, *vb, m_settings.sampleRate, m_settings.maxRenderThreads);
+        auto rendered = m_resampler.renderTrack(pitchedTrack, *vb, effectiveSampleRate, effectiveThreads);
         if (rendered.pcm.empty()) {
             continue;
         }
@@ -473,16 +482,17 @@ void MainWindow::exportWav() {
         sample = std::clamp(sample * m_settings.masterGain, -1.0F, 1.0F);
     }
 
-    if (!m_audio.exportWav(path.toStdString(), mixdown, m_settings.sampleRate)) {
+    if (!m_audio.exportWav(path.toStdString(), mixdown, effectiveSampleRate)) {
         QMessageBox::critical(this, "Export", "Failed to write wav file.");
         return;
     }
 
-    m_statusLabel->setText(QString("Exported: %1 | tracks %2 | render %3 ms | workers %4")
+    m_statusLabel->setText(QString("Exported: %1 | tracks %2 | render %3 ms | workers %4 | lowEnd=%5")
                                .arg(path)
                                .arg(usedTracks)
                                .arg(QString::number(totalRenderMs, 'f', 2))
-                               .arg(totalWorkers));
+                               .arg(totalWorkers)
+                               .arg(m_settings.lowEndDeviceMode ? "ON" : "OFF"));
 }
 
 bool MainWindow::tryParseVersionTag(const std::string& tag, VersionToken& out) {

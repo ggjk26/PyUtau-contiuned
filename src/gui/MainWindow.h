@@ -43,6 +43,7 @@ private:
         bool enableAutoPitchLine = true;
         int autoVibratoDepthCents = 18;
         double autoVibratoRateHz = 5.5;
+        bool lowEndDeviceMode = false;
     };
 
     struct VersionToken {

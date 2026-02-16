@@ -14,14 +14,21 @@ constexpr double kTicksPerQuarter = 480.0;
 constexpr double kDefaultBpm = 120.0;
 constexpr float kAmplitude = 0.15F;
 
-std::size_t resolveWorkerCount(std::size_t noteCount, unsigned int maxThreads) {
+std::size_t resolveWorkerCount(std::size_t noteCount,
+                               std::size_t totalFrames,
+                               unsigned int maxThreads,
+                               std::size_t memoryBudgetBytes = 64U * 1024U * 1024U) {
     if (noteCount == 0) {
         return 1;
     }
 
     const auto hardware = std::max(1U, std::thread::hardware_concurrency());
     const auto requested = maxThreads == 0 ? hardware : maxThreads;
-    return std::clamp<std::size_t>(requested, 1, noteCount);
+
+    const std::size_t bytesPerWorker = std::max<std::size_t>(1, totalFrames) * sizeof(float);
+    const std::size_t memoryLimited = std::max<std::size_t>(1, memoryBudgetBytes / bytesPerWorker);
+
+    return std::clamp<std::size_t>(requested, 1, std::min(noteCount, memoryLimited));
 }
 
 int tickToFrame(int tick, double framesPerTick) {
@@ -94,7 +101,7 @@ RenderResult Resampler::renderTrack(const Track& track,
         return result;
     }
 
-    const auto workerCount = resolveWorkerCount(track.notes.size(), maxThreads);
+    const auto workerCount = resolveWorkerCount(track.notes.size(), static_cast<std::size_t>(totalFrames), maxThreads);
     result.workerThreads = workerCount;
 
     std::vector<std::vector<float>> workerBuffers(workerCount, std::vector<float>(static_cast<std::size_t>(totalFrames), 0.0F));
