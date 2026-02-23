@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <random>
+#include <unordered_map>
 #include <unordered_set>
 
 #include <QDialog>
@@ -41,6 +42,52 @@ namespace pyutau::gui {
 namespace {
 constexpr const char* kCurrentVersion = "0.1.0-preview";
 constexpr const char* kFallbackGithubRepo = "OpenUtau/PyUtau-contiuned";
+
+std::string normalizeAliasToken(const std::string& text) {
+    std::string out;
+    out.reserve(text.size());
+    for (char ch : text) {
+        if (!std::isspace(static_cast<unsigned char>(ch))) {
+            out.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+        }
+    }
+    return out;
+}
+
+std::string kanaToRomaji(const std::string& token) {
+    static const std::unordered_map<std::string, std::string> kMap{
+        {"あ", "a"}, {"い", "i"}, {"う", "u"}, {"え", "e"}, {"お", "o"},
+        {"か", "ka"}, {"き", "ki"}, {"く", "ku"}, {"け", "ke"}, {"こ", "ko"},
+        {"さ", "sa"}, {"し", "shi"}, {"す", "su"}, {"せ", "se"}, {"そ", "so"},
+        {"た", "ta"}, {"ち", "chi"}, {"つ", "tsu"}, {"て", "te"}, {"と", "to"},
+        {"な", "na"}, {"に", "ni"}, {"ぬ", "nu"}, {"ね", "ne"}, {"の", "no"},
+        {"は", "ha"}, {"ひ", "hi"}, {"ふ", "fu"}, {"へ", "he"}, {"ほ", "ho"},
+        {"ま", "ma"}, {"み", "mi"}, {"む", "mu"}, {"め", "me"}, {"も", "mo"},
+        {"や", "ya"}, {"ゆ", "yu"}, {"よ", "yo"},
+        {"ら", "ra"}, {"り", "ri"}, {"る", "ru"}, {"れ", "re"}, {"ろ", "ro"},
+        {"わ", "wa"}, {"を", "wo"}, {"ん", "n"},
+        {"が", "ga"}, {"ぎ", "gi"}, {"ぐ", "gu"}, {"げ", "ge"}, {"ご", "go"},
+        {"ざ", "za"}, {"じ", "ji"}, {"ず", "zu"}, {"ぜ", "ze"}, {"ぞ", "zo"},
+        {"だ", "da"}, {"で", "de"}, {"ど", "do"},
+        {"ば", "ba"}, {"び", "bi"}, {"ぶ", "bu"}, {"べ", "be"}, {"ぼ", "bo"},
+        {"ぱ", "pa"}, {"ぴ", "pi"}, {"ぷ", "pu"}, {"ぺ", "pe"}, {"ぽ", "po"},
+    };
+    const auto found = kMap.find(token);
+    if (found != kMap.end()) {
+        return found->second;
+    }
+    return normalizeAliasToken(token);
+}
+
+char extractLastVowel(const std::string& token) {
+    for (auto it = token.rbegin(); it != token.rend(); ++it) {
+        const char c = *it;
+        if (c == 'a' || c == 'i' || c == 'u' || c == 'e' || c == 'o') {
+            return c;
+        }
+    }
+    return 'a';
+}
 }
 
 MainWindow::MainWindow(QWidget* parent)
@@ -498,44 +545,38 @@ pyutau::core::Track MainWindow::applyPitchEnhancements(const pyutau::core::Track
 pyutau::core::Track MainWindow::applyPhonemizer(const pyutau::core::Track& track) const {
     auto phonemized = track;
 
-    auto normalizeNative = [](const std::string& lyric) {
-        std::string out;
-        out.reserve(lyric.size());
-        for (char ch : lyric) {
-            if (!std::isspace(static_cast<unsigned char>(ch))) {
-                out.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
-            }
-        }
-        return out;
-    };
-
     std::string prev = "sil";
     for (auto& note : phonemized.notes) {
         if (note.lyric.empty()) {
             note.lyric = "a";
         }
 
-        switch (static_cast<PhonemizerType>(std::clamp(track.phonemizerType, 0, 2))) {
+        const auto baseToken = kanaToRomaji(note.lyric);
+        const auto mode = static_cast<PhonemizerType>(std::clamp(track.phonemizerType, 0, 2));
+
+        switch (mode) {
             case PhonemizerType::JpVcvCvvc: {
                 if (prev == "sil") {
-                    note.lyric = note.lyric;
+                    note.lyric = "- " + baseToken;
                 } else {
-                    note.lyric = prev + " " + note.lyric;
+                    const std::string vcv = prev + " " + baseToken;
+                    const std::string cvvcTail(1, extractLastVowel(baseToken));
+                    note.lyric = vcv + " | " + baseToken + " " + cvvcTail;
                 }
                 break;
             }
             case PhonemizerType::DiffSingerJapanese: {
-                note.lyric = "dsj:" + note.lyric;
+                note.lyric = "dsj/" + baseToken;
                 break;
             }
             case PhonemizerType::PyUtauNative:
             default: {
-                note.lyric = "py:" + normalizeNative(note.lyric);
+                note.lyric = "py:" + baseToken;
                 break;
             }
         }
 
-        prev = normalizeNative(note.lyric);
+        prev = std::string(1, extractLastVowel(baseToken));
     }
 
     return phonemized;
