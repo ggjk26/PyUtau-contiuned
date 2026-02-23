@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 
 #include <algorithm>
+#include <cctype>
 #include <random>
 
 #include <QDialog>
@@ -355,6 +356,12 @@ void MainWindow::openSettings() {
     auto* lowEndCheck = new QCheckBox("Low-end device mode (lower CPU/memory)", &dialog);
     lowEndCheck->setChecked(m_settings.lowEndDeviceMode);
 
+    auto* phonemizerBox = new QComboBox(&dialog);
+    phonemizerBox->addItem("JP VCV & CVVC Phonemizer (Default)", static_cast<int>(PhonemizerType::JpVcvCvvc));
+    phonemizerBox->addItem("DiffSinger Japanese Phonemizer", static_cast<int>(PhonemizerType::DiffSingerJapanese));
+    phonemizerBox->addItem("PyUTAU Native Phonemizer", static_cast<int>(PhonemizerType::PyUtauNative));
+    phonemizerBox->setCurrentIndex(static_cast<int>(m_settings.phonemizerType));
+
     layout->addRow("Render Threads (0=Auto)", threadSpin);
     layout->addRow("Master Gain", gainSpin);
     layout->addRow("Sample Rate", sampleRateSpin);
@@ -363,6 +370,7 @@ void MainWindow::openSettings() {
     layout->addRow("Vibrato Depth (cents)", vibratoDepthSpin);
     layout->addRow("Vibrato Rate (Hz)", vibratoRateSpin);
     layout->addRow("Performance", lowEndCheck);
+    layout->addRow("Phonemizer", phonemizerBox);
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
     layout->addRow(buttons);
@@ -381,8 +389,10 @@ void MainWindow::openSettings() {
     m_settings.autoVibratoDepthCents = vibratoDepthSpin->value();
     m_settings.autoVibratoRateHz = vibratoRateSpin->value();
     m_settings.lowEndDeviceMode = lowEndCheck->isChecked();
+    m_settings.phonemizerType = static_cast<PhonemizerType>(phonemizerBox->currentIndex());
 
-    m_statusLabel->setText(QString("Settings saved | threads=%1 masterGain=%2 sampleRate=%3 aiRetrain=%4 autoPitch=%5 vib=%6c/%7Hz lowEnd=%8")
+    const QString phonemizerText = phonemizerBox->currentText();
+    m_statusLabel->setText(QString("Settings saved | threads=%1 masterGain=%2 sampleRate=%3 aiRetrain=%4 autoPitch=%5 vib=%6c/%7Hz lowEnd=%8 phonemizer=%9")
                                .arg(m_settings.maxRenderThreads)
                                .arg(QString::number(m_settings.masterGain, 'f', 2))
                                .arg(m_settings.sampleRate)
@@ -390,7 +400,8 @@ void MainWindow::openSettings() {
                                .arg(m_settings.enableAutoPitchLine ? "ON" : "OFF")
                                .arg(m_settings.autoVibratoDepthCents)
                                .arg(QString::number(m_settings.autoVibratoRateHz, 'f', 2))
-                               .arg(m_settings.lowEndDeviceMode ? "ON" : "OFF"));
+                               .arg(m_settings.lowEndDeviceMode ? "ON" : "OFF")
+                               .arg(phonemizerText));
 }
 
 void MainWindow::addTrack() {
@@ -437,6 +448,52 @@ pyutau::core::Track MainWindow::applyPitchEnhancements(const pyutau::core::Track
         note.autoVibratoRateHz = m_settings.autoVibratoRateHz;
     }
     return enhanced;
+}
+
+pyutau::core::Track MainWindow::applyPhonemizer(const pyutau::core::Track& track) const {
+    auto phonemized = track;
+
+    auto normalizeNative = [](const std::string& lyric) {
+        std::string out;
+        out.reserve(lyric.size());
+        for (char ch : lyric) {
+            if (!std::isspace(static_cast<unsigned char>(ch))) {
+                out.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+            }
+        }
+        return out;
+    };
+
+    std::string prev = "sil";
+    for (auto& note : phonemized.notes) {
+        if (note.lyric.empty()) {
+            note.lyric = "a";
+        }
+
+        switch (m_settings.phonemizerType) {
+            case PhonemizerType::JpVcvCvvc: {
+                if (prev == "sil") {
+                    note.lyric = note.lyric;
+                } else {
+                    note.lyric = prev + " " + note.lyric;
+                }
+                break;
+            }
+            case PhonemizerType::DiffSingerJapanese: {
+                note.lyric = "dsj:" + note.lyric;
+                break;
+            }
+            case PhonemizerType::PyUtauNative:
+            default: {
+                note.lyric = "py:" + normalizeNative(note.lyric);
+                break;
+            }
+        }
+
+        prev = normalizeNative(note.lyric);
+    }
+
+    return phonemized;
 }
 
 void MainWindow::updateRenderProgress(int current, int total, const QString& stage) {
@@ -544,7 +601,8 @@ void MainWindow::exportWav() {
         }
 
         const auto mappedTrack = applyDictionary(track);
-        const auto pitchedTrack = applyPitchEnhancements(mappedTrack);
+        const auto phonemizedTrack = applyPhonemizer(mappedTrack);
+        const auto pitchedTrack = applyPitchEnhancements(phonemizedTrack);
         auto rendered = m_resampler.renderTrack(pitchedTrack, *vb, effectiveSampleRate, effectiveThreads);
         if (rendered.pcm.empty()) {
             continue;
@@ -615,7 +673,10 @@ void MainWindow::exportWav() {
     m_renderProgress->setFormat("Ready");
 
     const int nominalKbps = effectiveSampleRate * bitsPerSample * channels / 1000;
-    m_statusLabel->setText(QString("Exported: %1 | tracks %2 | %3Hz/%4bit/%5ch (~%6kbps) | breath=%7 | render %8 ms")
+    const QString phonemizerLabel = (m_settings.phonemizerType == PhonemizerType::JpVcvCvvc)
+                                        ? "JP VCV&CVVC"
+                                        : (m_settings.phonemizerType == PhonemizerType::DiffSingerJapanese ? "DiffSinger JP" : "PyUTAU Native");
+    m_statusLabel->setText(QString("Exported: %1 | tracks %2 | %3Hz/%4bit/%5ch (~%6kbps) | breath=%7 | phonemizer=%8 | render %9 ms")
                                .arg(path)
                                .arg(usedTracks)
                                .arg(effectiveSampleRate)
@@ -623,6 +684,7 @@ void MainWindow::exportWav() {
                                .arg(channels)
                                .arg(nominalKbps)
                                .arg(breathMode)
+                               .arg(phonemizerLabel)
                                .arg(QString::number(totalRenderMs, 'f', 2)));
 }
 

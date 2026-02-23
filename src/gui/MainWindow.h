@@ -38,6 +38,12 @@ private slots:
     void showAboutAndUpdates();
 
 private:
+    enum class PhonemizerType {
+        JpVcvCvvc = 0,
+        DiffSingerJapanese = 1,
+        PyUtauNative = 2,
+    };
+
     struct AppSettings {
         unsigned int maxRenderThreads = 0;
         float masterGain = 0.95F;
@@ -47,6 +53,7 @@ private:
         int autoVibratoDepthCents = 18;
         double autoVibratoRateHz = 5.5;
         bool lowEndDeviceMode = false;
+        PhonemizerType phonemizerType = PhonemizerType::JpVcvCvvc;
     };
 
     struct VersionToken {
@@ -58,6 +65,7 @@ private:
 
     [[nodiscard]] pyutau::core::Track applyDictionary(const pyutau::core::Track& track) const;
     [[nodiscard]] pyutau::core::Track applyPitchEnhancements(const pyutau::core::Track& track) const;
+    [[nodiscard]] pyutau::core::Track applyPhonemizer(const pyutau::core::Track& track) const;
     [[nodiscard]] static bool tryParseVersionTag(const std::string& tag, VersionToken& out);
     [[nodiscard]] static int compareVersion(const VersionToken& lhs, const VersionToken& rhs);
     [[nodiscard]] static std::string detectGitHubRepoFromGitRemote();
