@@ -1,6 +1,6 @@
-# PyUtau Continued (C++ 基础原型)
-
-这是一个“从 0 到 1”的 C++ UTAU 底层原型，目标是先搭起可扩展架构：
+> [!CAUTION]
+> 此项目基于OpenAI Codex生成，本人对于C++无任何基础，Cmake不保证构建成功。并且该项目处于极早期版本，而且任何代码仅基于OpenAI自带的源代码审核和codex的可用性测试，如果我有时间的话我会构建Release上传，尽量做到每个版本Bug最少化。
+# PyUtau Continued
 
 - `core/Project`：工程数据结构（音符、轨道、速度），支持多音轨参数（轨道增益、静音、独立声库 ID）。
 - `core/UstParser`：读取基础 UST 字段，并支持 OpenUTAU 的 USTX 工程文件载入（基础轨道/音符字段）。
