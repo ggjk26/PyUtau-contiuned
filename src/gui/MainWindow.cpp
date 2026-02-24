@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include <QAction>
 #include <QDialog>
 #include <QDesktopServices>
 #include <QDialogButtonBox>
@@ -20,6 +21,7 @@
 #include <QLineEdit>
 #include <QDoubleSpinBox>
 #include <QLabel>
+#include <QKeySequence>
 #include <QListWidget>
 #include <QListWidgetItem>
 #include <QProgressBar>
@@ -1022,10 +1024,13 @@ QMenuBar { background: #232733; color: #d7dce6; }
 QMenuBar::item:selected { background: #3a4154; }
 QMenu { background: #232733; color: #d7dce6; border: 1px solid #3a4154; }
 QMenu::item:selected { background: #3a4154; }
-QToolBar { background: #20242f; border-bottom: 1px solid #3a4154; spacing: 4px; }
-QToolButton { background: #2d3342; color: #e2e7f0; border: 1px solid #444d65; border-radius: 4px; padding: 4px 8px; }
+QToolBar { background: #20242f; border-bottom: 1px solid #3a4154; spacing: 4px; padding: 4px; }
+QToolBar#MainTransportBar { background: #1b2230; border-bottom: 1px solid #4b5c7f; }
+QToolBar#EditToolBar { background: #171b26; border-bottom: 1px solid #343f58; }
+QToolButton { background: #2d3342; color: #e2e7f0; border: 1px solid #444d65; border-radius: 4px; padding: 4px 8px; min-width: 56px; }
 QToolButton:hover { background: #3b4358; }
-QListWidget { background: #151821; color: #d7dce6; border: 1px solid #3a4154; }
+QToolButton:checked { background: #587ed6; border-color: #6f95eb; }
+QListWidget { background: #151821; color: #d7dce6; border: 1px solid #3a4154; alternate-background-color: #191e29; }
 QListWidget::item:selected { background: #4d6aa8; color: #ffffff; }
 QStatusBar { background: #1f2330; color: #d7dce6; }
 QLabel { color: #d7dce6; }
@@ -1047,42 +1052,96 @@ QString MainWindow::phonemizerTypeToLabel(int type) {
 
 void MainWindow::buildUi() {
     auto* fileMenu = menuBar()->addMenu("File");
-    fileMenu->addAction("Open UST/USTX", this, &MainWindow::openUst);
+    auto* actionOpen = fileMenu->addAction("Open UST/USTX", this, &MainWindow::openUst);
+    actionOpen->setShortcut(QKeySequence::Open);
     fileMenu->addAction("Voicebank Manager", this, &MainWindow::manageVoicebanks);
     fileMenu->addAction("Dictionary", this, &MainWindow::manageDictionary);
     fileMenu->addAction("Settings", this, &MainWindow::openSettings);
-    fileMenu->addAction("Add Track", this, &MainWindow::addTrack);
+    auto* actionAddTrack = fileMenu->addAction("Add Track", this, &MainWindow::addTrack);
+    actionAddTrack->setShortcut(QKeySequence("Ctrl+Shift+T"));
     fileMenu->addAction("Track Settings", this, &MainWindow::openTrackSettings);
-    fileMenu->addAction("Export WAV", this, &MainWindow::exportWav);
+    auto* actionExport = fileMenu->addAction("Export WAV", this, &MainWindow::exportWav);
+    actionExport->setShortcut(QKeySequence("Ctrl+E"));
+
+    auto* editMenu = menuBar()->addMenu("Edit");
+    editMenu->addAction("Track Settings", this, &MainWindow::openTrackSettings, QKeySequence("Ctrl+T"));
+    editMenu->addAction("Dictionary", this, &MainWindow::manageDictionary, QKeySequence("Ctrl+D"));
+
+    auto* projectMenu = menuBar()->addMenu("Project");
+    projectMenu->addAction("Voicebank Manager", this, &MainWindow::manageVoicebanks);
+    projectMenu->addAction("Render Mix", this, &MainWindow::exportWav, QKeySequence("Ctrl+R"));
 
     auto* helpMenu = menuBar()->addMenu("Help");
     helpMenu->addAction("About / Updates", this, &MainWindow::showAboutAndUpdates);
 
-    auto* toolbar = addToolBar("Transport");
-    toolbar->setMovable(false);
-    toolbar->addAction("Open UST/USTX", this, &MainWindow::openUst);
-    toolbar->addAction("Voicebank", this, &MainWindow::openVoicebank);
-    toolbar->addAction("Dictionary", this, &MainWindow::manageDictionary);
-    toolbar->addAction("Settings", this, &MainWindow::openSettings);
-    toolbar->addAction("Add Track", this, &MainWindow::addTrack);
-    toolbar->addAction("Track Settings", this, &MainWindow::openTrackSettings);
-    toolbar->addAction("Render Mix", this, &MainWindow::exportWav);
-    toolbar->addAction("About/Updates", this, &MainWindow::showAboutAndUpdates);
+    auto* transportBar = addToolBar("Main Transport");
+    transportBar->setObjectName("MainTransportBar");
+    transportBar->setMovable(false);
+
+    auto* actionRewind = transportBar->addAction("|<");
+    actionRewind->setToolTip("Go to Start");
+    connect(actionRewind, &QAction::triggered, this, [this]() { m_statusLabel->setText("Transport: jumped to start (SynthV-style)."); });
+
+    auto* actionPlay = transportBar->addAction("▶");
+    actionPlay->setToolTip("Play (Space)");
+    actionPlay->setShortcut(QKeySequence(Qt::Key_Space));
+    connect(actionPlay, &QAction::triggered, this, [this]() { m_statusLabel->setText("Transport: play preview (placeholder)."); });
+
+    auto* actionStop = transportBar->addAction("■");
+    actionStop->setToolTip("Stop");
+    connect(actionStop, &QAction::triggered, this, [this]() { m_statusLabel->setText("Transport: stop."); });
+
+    transportBar->addSeparator();
+    transportBar->addAction(actionOpen);
+    transportBar->addAction(actionAddTrack);
+    transportBar->addAction(actionExport);
+    transportBar->addAction("Voicebank", this, &MainWindow::openVoicebank);
+
+    auto* editToolBar = addToolBar("Edit Tools");
+    editToolBar->setObjectName("EditToolBar");
+    editToolBar->setMovable(false);
+
+    auto* actionPointer = editToolBar->addAction("Pointer");
+    actionPointer->setCheckable(true);
+    actionPointer->setChecked(true);
+    auto* actionDraw = editToolBar->addAction("Draw");
+    actionDraw->setCheckable(true);
+    auto* actionPitch = editToolBar->addAction("Pitch");
+    actionPitch->setCheckable(true);
+    connect(actionPointer, &QAction::triggered, this, [=]() { actionPointer->setChecked(true); actionDraw->setChecked(false); actionPitch->setChecked(false); m_statusLabel->setText("Tool: Pointer"); });
+    connect(actionDraw, &QAction::triggered, this, [=]() { actionPointer->setChecked(false); actionDraw->setChecked(true); actionPitch->setChecked(false); m_statusLabel->setText("Tool: Draw Notes"); });
+    connect(actionPitch, &QAction::triggered, this, [=]() { actionPointer->setChecked(false); actionDraw->setChecked(false); actionPitch->setChecked(true); m_statusLabel->setText("Tool: Edit Pitch"); });
+
+    editToolBar->addSeparator();
+    editToolBar->addAction("Track Settings", this, &MainWindow::openTrackSettings);
+    editToolBar->addAction("Dictionary", this, &MainWindow::manageDictionary);
+    editToolBar->addAction("About/Updates", this, &MainWindow::showAboutAndUpdates);
 
     auto* root = new QWidget(this);
     auto* rootLayout = new QVBoxLayout(root);
+    rootLayout->setContentsMargins(4, 4, 4, 4);
+    rootLayout->setSpacing(6);
+
+    auto* timelineHeader = new QLabel("Arrangement / Piano Roll  ·  Snap 1/16  ·  Tempo 120", root);
+    timelineHeader->setStyleSheet("background:#151a24; border:1px solid #3a4154; border-radius:4px; padding:6px 10px; color:#a9b8d8;");
+    rootLayout->addWidget(timelineHeader);
+
     auto* splitter = new QSplitter(Qt::Horizontal, root);
 
     m_trackList = new QListWidget(splitter);
-    m_trackList->setMinimumWidth(320);
+    m_trackList->setMinimumWidth(340);
+    m_trackList->setAlternatingRowColors(true);
     connect(m_trackList, &QListWidget::currentRowChanged, this, &MainWindow::trackSelectionChanged);
 
     m_pianoRoll = new PianoRollWidget(splitter);
 
     auto* inspector = new QWidget(splitter);
-    inspector->setMinimumWidth(300);
+    inspector->setMinimumWidth(320);
     auto* inspectorLayout = new QVBoxLayout(inspector);
-    inspectorLayout->addWidget(new QLabel("Inspector 占位区\n- 轨道参数\n- 声库管理入口\n- 词典映射状态", inspector));
+    auto* inspectorTitle = new QLabel("Inspector (SynthV-style)", inspector);
+    inspectorTitle->setStyleSheet("font-weight:600; color:#c7d4f3;");
+    inspectorLayout->addWidget(inspectorTitle);
+    inspectorLayout->addWidget(new QLabel("- Track params\n- Voicebank mapping\n- Phonemizer\n- Dictionary status", inspector));
     inspectorLayout->addStretch(1);
 
     splitter->addWidget(m_trackList);
