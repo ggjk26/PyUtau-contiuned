@@ -1,6 +1,13 @@
 > [!CAUTION]
-> 此项目基于OpenAI Codex生成，本人对于C++无任何基础，Cmake不保证构建成功。并且该项目处于极早期版本，而且任何代码仅基于OpenAI自带的源代码审核和codex的可用性测试，如果我有时间的话我会构建Release上传，尽量做到每个版本Bug最少化。
+> 此项目基于OpenAI Codex生成，woekflow由ChatGPT5.0构建，Google Gemini完善。本人对于C++仅有有限基础，Cmake不保证构建成功。并且该项目处于极早期版本，而且任何代码仅基于OpenAI自带的源代码审核和codex的可用性测试，如果我有时间的话我会构建Release上传，尽量做到每个版本Bug最少化。
 # PyUtau Continued
+
+## 构建
+该项目使用了Qt6，所以需要有Qt6的支持库为前提才能够构建该项目。
+```bash
+cmake -S . -B build
+cmake --build build
+```
 
 - `core/Project`：工程数据结构（音符、轨道、速度），支持多音轨参数（轨道增益、静音、独立声库 ID）。
 - `core/UstParser`：读取基础 UST 字段，并支持 OpenUTAU 的 USTX 工程文件载入（基础轨道/音符字段）。
@@ -9,12 +16,6 @@
 - `audio/AudioEngine`：导出 PCM 到 WAV。
 - `gui/MainWindow + PianoRollWidget`：Qt Widgets 图形界面，布局参考 Synthesizer V Studio 的轨道区 + 钢琴卷帘 + Inspector 三栏结构。
 
-## 构建
-
-```bash
-cmake -S . -B build
-cmake --build build
-```
 
 > 依赖：Qt6 Widgets。Windows/MSVC 构建默认使用 Microsoft C++ 运行库（DLL 运行时）。
 
@@ -45,3 +46,4 @@ cmake --build build
 >2. 开发Android兼容端
 >3. 增加硬件加速渲染/推理
 >4. 进一步优化引擎性能
+>5. 多语言支持
