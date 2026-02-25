@@ -1,4 +1,4 @@
-name: Build Qt6 PyUtau and Publish Release
+name: Auto Building Workflow
 
 on:
   push:
