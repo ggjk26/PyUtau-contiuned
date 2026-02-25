@@ -3,129 +3,131 @@ name: Auto Building Workflow
 on:
   push:
     tags:
-      - "v*"
-  workflow_dispatch:
+      - "v*" # 當推送到 v 開頭的標籤時觸發構建與發布
+  workflow_dispatch: # 允許手動觸發構建
 
 env:
   QT_VERSION: 6.6.2
   BUILD_TYPE: Release
+  PROJECT_NAME: PyUtau
 
 jobs:
   build:
     name: Build on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # 使用特定版本鏡像以確保環境一致性
+        os: [windows-latest, ubuntu-22.04, macos-latest]
 
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       # ─────────────────────────────────
-      # 安装 Qt（带缓存）
+      # 1. 環境準備
       # ─────────────────────────────────
+      - name: Install Linux Dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-dev libxkbcommon-x11-0 libxcb-cursor0 libxcb-xinerama0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-shape0
+
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}
           cache: true
+          # 確保 host 與 runner 匹配
+          host: ${{ runner.os == 'Windows' && 'windows' || (runner.os == 'Linux' && 'linux' || 'mac') }}
 
       # ─────────────────────────────────
-      # CMake 缓存（加速构建）
-      # ─────────────────────────────────
-      - name: Cache build directory
-        uses: actions/cache@v4
-        with:
-          path: build
-          key: ${{ runner.os }}-cmake-${{ hashFiles('**/CMakeLists.txt') }}
-
-      # ─────────────────────────────────
-      # 配置 CMake
+      # 2. 編譯階段
       # ─────────────────────────────────
       - name: Configure CMake
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
 
-      # ─────────────────────────────────
-      # 构建
-      # ─────────────────────────────────
-      - name: Build
+      - name: Build Project
         run: cmake --build build --config ${{ env.BUILD_TYPE }} --parallel
 
       # ─────────────────────────────────
-      # Windows：部署 Qt 运行库
+      # 3. 平台特定打包 (Windows 便攜化優化)
       # ─────────────────────────────────
-      - name: Deploy Qt (Windows)
+      
+      # Windows：建立獨立目錄並導入所有運行庫
+      - name: Package Windows Portable
         if: runner.os == 'Windows'
-        shell: powershell
+        shell: pwsh
         run: |
-          $exe = Get-ChildItem build -Recurse -Filter *.exe | Select-Object -First 1
-          windeployqt $exe.FullName
+          $DIST_DIR = "PyUtau-Windows-Portable"
+          New-Item -ItemType Directory -Path $DIST_DIR
+          # 尋找編譯出的 .exe (排除 CMake 中間文件)
+          $EXE_PATH = Get-ChildItem -Path build -Filter "${{ env.PROJECT_NAME }}*.exe" -Recurse | Where-Object { $_.FullName -notlike "*\CMakeFiles\*" } | Select-Object -First 1 -ExpandProperty FullName
+          Copy-Item $EXE_PATH "$DIST_DIR/"
+          # 執行 windeployqt 並包含編譯器運行庫 (msvcp140.dll 等)
+          windeployqt --dir "$DIST_DIR" --compiler-runtime --verbose 1 "$DIST_DIR/$(Split-Path $EXE_PATH -Leaf)"
+          # 壓縮
+          Compress-Archive -Path "$DIST_DIR\*" -DestinationPath "${{ env.PROJECT_NAME }}-Windows-x64.zip"
 
-      # ─────────────────────────────────
-      # macOS：创建 .app Bundle
-      # ─────────────────────────────────
-      - name: Bundle macOS App
+      # macOS：使用 macdeployqt 修復庫路徑
+      - name: Package macOS
         if: runner.os == 'macOS'
         run: |
-          mkdir -p dist
-          cp -R build/*.app dist/ || true
+          APP_PATH=$(find build -name "*.app" | head -n 1)
+          # macdeployqt 會將 Qt 框架嵌入到 .app 內部
+          macdeployqt "$APP_PATH" -dmg
+          # 同時提供 zip 版
+          zip -r "${{ env.PROJECT_NAME }}-macOS.zip" "$APP_PATH"
+          mv build/*.dmg "${{ env.PROJECT_NAME }}-macOS.dmg" || true
 
-      # ─────────────────────────────────
-      # Linux：便携包
-      # ─────────────────────────────────
-      - name: Package Linux Binary
+      # Linux：打包二進制
+      - name: Package Linux
         if: runner.os == 'Linux'
         run: |
-          mkdir -p dist
-          cp build/PyUtau* dist/ || true
-          tar -czf PyUtau-linux.tar.gz dist
+          DIST_DIR="dist-linux"
+          mkdir -p $DIST_DIR
+          find build -maxdepth 2 -executable -type f -name "${{ env.PROJECT_NAME }}*" -exec cp {} $DIST_DIR/ \;
+          tar -czf "${{ env.PROJECT_NAME }}-Linux.tar.gz" -C $DIST_DIR .
 
       # ─────────────────────────────────
-      # Windows：打包便携版
-      # ─────────────────────────────────
-      - name: Package Windows Binary
-        if: runner.os == 'Windows'
-        shell: powershell
-        run: |
-          mkdir dist
-          Copy-Item build -Recurse dist/app
-          Compress-Archive -Path dist/app -DestinationPath PyUtau-windows.zip
-
-      # ─────────────────────────────────
-      # macOS：压缩 app
-      # ─────────────────────────────────
-      - name: Package macOS App
-        if: runner.os == 'macOS'
-        run: |
-          tar -czf PyUtau-macos.tar.gz dist
-
-      # ─────────────────────────────────
-      # 上传构建产物
+      # 4. 上傳構建產物到 Artifacts (暫存)
       # ─────────────────────────────────
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PyUtau-${{ runner.os }}
+          name: ${{ matrix.os }}-build
           path: |
             *.zip
             *.tar.gz
-            dist/*
+            *.dmg
 
+  # ─────────────────────────────────
+  # 5. 自動發布到 GitHub Release
+  # ─────────────────────────────────
   release:
     name: Publish GitHub Release
     needs: build
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: write # 賦予建立 Release 的權限
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
+        with:
+          path: ./downloads
+          merge-multiple: true # 將所有平台的產物合併到同一層級
 
       - name: Publish Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            **/*.zip
-            **/*.tar.gz
+            ./downloads/*.zip
+            ./downloads/*.tar.gz
+            ./downloads/*.dmg
+          generate_release_notes: true
+          draft: false
+          prerelease: false
