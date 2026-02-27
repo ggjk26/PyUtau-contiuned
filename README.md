@@ -1,5 +1,5 @@
 > [!CAUTION]
-> 此项目基于OpenAI Codex生成，woekflow由ChatGPT5.0构建，Google Gemini完善。本人对于C++仅有有限基础，Cmake不保证构建成功。并且该项目处于极早期版本，而且任何代码仅基于OpenAI自带的源代码审核和codex的可用性测试，如果我有时间的话我会构建Release上传，尽量做到每个版本Bug最少化。
+> 此项目基于OpenAI Codex生成，woekflow由Google Gemini完善。本人对于C++仅有有限基础，Cmake不保证构建成功。并且该项目处于极早期版本，而且任何代码仅基于OpenAI自带的源代码审核和codex的可用性测试，如果我有时间的话我会构建Release上传，尽量做到每个版本Bug最少化。
 # PyUtau Continued
 
 ## 构建
