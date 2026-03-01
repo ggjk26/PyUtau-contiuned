@@ -1,0 +1,135 @@
+name: Auto Building Workflow
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+env:
+  QT_VERSION: 6.6.2
+  BUILD_TYPE: Release
+  # 必须与 CMakeLists.txt 中的 qt_add_executable 名称一致
+  PROJECT_NAME: pyutau_continued 
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-22.04, macos-latest]
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # ─────────────────────────────────
+      # 1. 环境准备
+      # ─────────────────────────────────
+      - name: Install Linux Dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-dev libxkbcommon-x11-0 libxcb-cursor0 libxcb-xinerama0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-shape0
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          cache: true
+          host: ${{ runner.os == 'Windows' && 'windows' || (runner.os == 'Linux' && 'linux' || 'mac') }}
+
+      # ─────────────────────────────────
+      # 2. 编译阶段 (根据你的 CMakeLists.txt)
+      # ─────────────────────────────────
+      - name: Configure CMake
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+
+      - name: Build Project
+        run: cmake --build build --config ${{ env.BUILD_TYPE }} --parallel
+
+      # ─────────────────────────────────
+      # 3. Windows 便携化打包 (重点优化)
+      # ─────────────────────────────────
+      - name: Package Windows Portable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $DIST_DIR = "PyUtauContinued-Windows"
+          New-Item -ItemType Directory -Path $DIST_DIR
+
+          # 寻找编译出的 exe。由于 CMake 可能会把 exe 放在 build/Release 下或直接在 build 下
+          $EXE_PATH = Get-ChildItem -Path build -Filter "${{ env.PROJECT_NAME }}.exe" -Recurse | Where-Object { $_.FullName -notlike "*\CMakeFiles\*" } | Select-Object -First 1 -ExpandProperty FullName
+          
+          if (-not $EXE_PATH) { 
+            Write-Error "Could not find executable: ${{ env.PROJECT_NAME }}.exe"
+            exit 1 
+          }
+
+          # 拷贝主程序
+          Copy-Item $EXE_PATH "$DIST_DIR/"
+          $TARGET_EXE = "$DIST_DIR/${{ env.PROJECT_NAME }}.exe"
+
+          # 运行 windeployqt：抓取所有 Qt DLL 和 MSVC 运行库
+          windeployqt --dir "$DIST_DIR" --compiler-runtime --verbose 1 "$TARGET_EXE"
+
+          # 压缩
+          Compress-Archive -Path "$DIST_DIR\*" -DestinationPath "${{ env.PROJECT_NAME }}-Windows-x64.zip"
+
+      # ─────────────────────────────────
+      # 4. 其他平台打包
+      # ─────────────────────────────────
+      - name: Package macOS
+        if: runner.os == 'macOS'
+        run: |
+          APP_PATH=$(find build -name "*.app" | head -n 1)
+          macdeployqt "$APP_PATH" -dmg
+          zip -r "${{ env.PROJECT_NAME }}-macOS.zip" "$APP_PATH"
+          mv build/*.dmg "${{ env.PROJECT_NAME }}-macOS.dmg" || true
+
+      - name: Package Linux
+        if: runner.os == 'Linux'
+        run: |
+          DIST_DIR="dist-linux"
+          mkdir -p $DIST_DIR
+          find build -maxdepth 2 -executable -type f -name "${{ env.PROJECT_NAME }}*" -exec cp {} $DIST_DIR/ \;
+          tar -czf "${{ env.PROJECT_NAME }}-Linux.tar.gz" -C $DIST_DIR .
+
+      # ─────────────────────────────────
+      # 5. 上传与发布
+      # ─────────────────────────────────
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-${{ matrix.os }}
+          path: |
+            *.zip
+            *.tar.gz
+            *.dmg
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./downloads
+          merge-multiple: true
+
+      - name: Publish Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ./downloads/*.zip
+            ./downloads/*.tar.gz
+            ./downloads/*.dmg
+          generate_release_notes: true
