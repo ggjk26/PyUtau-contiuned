@@ -15,13 +15,15 @@ constexpr double kDefaultBpm = 120.0;
 constexpr float kAmplitude = 0.15F;
 
 std::size_t resolveWorkerCount(std::size_t noteCount,
-                               unsigned int maxThreads) {
+                               unsigned int maxThreads,
+                               RenderBackendType backend) {
     if (noteCount == 0) {
         return 1;
     }
     const auto hardware = std::max(1U, std::thread::hardware_concurrency());
     const auto requested = maxThreads == 0 ? hardware : maxThreads;
-    return std::clamp<std::size_t>(requested, 1, noteCount);
+    const std::size_t backendCap = backend == RenderBackendType::Vulkan ? 12 : 8;
+    return std::clamp<std::size_t>(requested, 1, std::min(noteCount, backendCap));
 }
 
 int tickToFrame(int tick, double framesPerTick) {
@@ -96,7 +98,6 @@ double computeHighPitchSafetyGain(double frequency, int sampleRate) {
 }
 
 double harmonicMixGain(double frequency) {
-    // OpenUTAU-like practical approach: reduce harmonics as pitch rises to avoid harshness.
     if (frequency < 500.0) {
         return 0.30;
     }
@@ -113,19 +114,18 @@ struct WorkerBuffer {
 
 } // namespace
 
-RenderResult Resampler::renderTrack(const Track& track,
-                                    const Voicebank& voicebank,
-                                    int sampleRate,
-                                    unsigned int maxThreads) const {
+RenderResult Resampler::renderTrack(const RenderRequest& request) const {
     RenderResult result;
-    auto& pcm = result.pcm;
-
-    if (track.notes.empty() || sampleRate <= 0) {
+    if (!request.track || !request.voicebank || request.sampleRate <= 0 || request.track->notes.empty()) {
         return result;
     }
 
+    const auto& track = *request.track;
+    const auto& voicebank = *request.voicebank;
+    auto& pcm = result.pcm;
+
     const auto started = std::chrono::steady_clock::now();
-    const auto framesPerTick = (60.0 * static_cast<double>(sampleRate)) / (kDefaultBpm * kTicksPerQuarter);
+    const auto framesPerTick = (60.0 * static_cast<double>(request.sampleRate)) / (kDefaultBpm * kTicksPerQuarter);
 
     int totalFrames = 0;
     for (const auto& note : track.notes) {
@@ -135,7 +135,7 @@ RenderResult Resampler::renderTrack(const Track& track,
         return result;
     }
 
-    const auto workerCount = resolveWorkerCount(track.notes.size(), maxThreads);
+    const auto workerCount = resolveWorkerCount(track.notes.size(), request.maxThreads, request.backend);
     result.workerThreads = workerCount;
 
     std::vector<WorkerBuffer> workerBuffers(workerCount);
@@ -180,9 +180,9 @@ RenderResult Resampler::renderTrack(const Track& track,
                 }
 
                 const auto baseFrequency = 440.0 * std::pow(2.0, (static_cast<double>(note.pitch) - 69.0) / 12.0);
-                const int fadeInFrames = std::max(1, std::min(renderFrames / 4, static_cast<int>(0.010 * static_cast<double>(sampleRate))));
-                const int fadeOutFrames = std::max(1, std::min(renderFrames / 4, static_cast<int>(0.020 * static_cast<double>(sampleRate))));
-                const int legatoBridgeFrames = resolveLegatoBridgeFrames(note, nextNote, framesPerTick, sampleRate);
+                const int fadeInFrames = std::max(1, std::min(renderFrames / 4, static_cast<int>(0.010 * static_cast<double>(request.sampleRate))));
+                const int fadeOutFrames = std::max(1, std::min(renderFrames / 4, static_cast<int>(0.020 * static_cast<double>(request.sampleRate))));
+                const int legatoBridgeFrames = request.enableSmoothTransition ? resolveLegatoBridgeFrames(note, nextNote, framesPerTick, request.sampleRate) : 0;
                 const double targetNextCents = nextNote ? (100.0 * static_cast<double>(nextNote->pitch - note.pitch)) : 0.0;
 
                 double phase = 0.0;
@@ -191,9 +191,9 @@ RenderResult Resampler::renderTrack(const Track& track,
 
                 for (int f = 0; f < renderFrames; ++f) {
                     const double progress = static_cast<double>(f) / static_cast<double>(std::max(1, renderFrames - 1));
-                    const double secondsFromStart = static_cast<double>(f) / static_cast<double>(sampleRate);
+                    const double secondsFromStart = static_cast<double>(f) / static_cast<double>(request.sampleRate);
                     const double manualCents = interpolatePitchBendCents(note, progress);
-                    const double autoCents = computeAutoPitchCents(note, secondsFromStart, progress);
+                    const double autoCents = request.enableAutoPitchPrediction ? computeAutoPitchCents(note, secondsFromStart, progress) : 0.0;
 
                     double legatoCents = 0.0;
                     if (legatoBridgeFrames > 0 && f >= (renderFrames - legatoBridgeFrames)) {
@@ -214,9 +214,9 @@ RenderResult Resampler::renderTrack(const Track& track,
                         env *= 1.0 - smoothStep(static_cast<double>(tailPos) / static_cast<double>(std::max(1, fadeOutFrames)));
                     }
 
-                    const double highPitchGain = computeHighPitchSafetyGain(modFrequency, sampleRate);
-                    phase += 2.0 * kPi * modFrequency / static_cast<double>(sampleRate);
-                    phaseH2 += 2.0 * kPi * (modFrequency * 2.0) / static_cast<double>(sampleRate);
+                    const double highPitchGain = computeHighPitchSafetyGain(modFrequency, request.sampleRate);
+                    phase += 2.0 * kPi * modFrequency / static_cast<double>(request.sampleRate);
+                    phaseH2 += 2.0 * kPi * (modFrequency * 2.0) / static_cast<double>(request.sampleRate);
 
                     const float sample = static_cast<float>(kAmplitude * env * highPitchGain * (std::sin(phase) + h2Gain * std::sin(phaseH2)));
                     local[static_cast<std::size_t>((startFrame - localStart) + f)] += sample;
@@ -246,6 +246,18 @@ RenderResult Resampler::renderTrack(const Track& track,
     const auto finished = std::chrono::steady_clock::now();
     result.elapsedMs = std::chrono::duration<double, std::milli>(finished - started).count();
     return result;
+}
+
+RenderResult Resampler::renderTrack(const Track& track,
+                                    const Voicebank& voicebank,
+                                    int sampleRate,
+                                    unsigned int maxThreads) const {
+    RenderRequest request;
+    request.track = &track;
+    request.voicebank = &voicebank;
+    request.sampleRate = sampleRate;
+    request.maxThreads = maxThreads;
+    return renderTrack(request);
 }
 
 } // namespace pyutau::core

@@ -406,6 +406,11 @@ void MainWindow::openSettings() {
     auto* lowEndCheck = new QCheckBox("Low-end device mode (lower CPU/memory)", &dialog);
     lowEndCheck->setChecked(m_settings.lowEndDeviceMode);
 
+    auto* backendBox = new QComboBox(&dialog);
+    backendBox->addItems({"OpenGL", "Vulkan"});
+    backendBox->setCurrentIndex(std::clamp(m_settings.renderBackend, 0, 1));
+
+    layout->addRow("Render Backend", backendBox);
     layout->addRow("Render Threads (0=Auto)", threadSpin);
     layout->addRow("Master Gain", gainSpin);
     layout->addRow("Sample Rate", sampleRateSpin);
@@ -432,6 +437,7 @@ void MainWindow::openSettings() {
     m_settings.autoVibratoDepthCents = vibratoDepthSpin->value();
     m_settings.autoVibratoRateHz = vibratoRateSpin->value();
     m_settings.lowEndDeviceMode = lowEndCheck->isChecked();
+    m_settings.renderBackend = backendBox->currentIndex();
 
     m_statusLabel->setText(QString("Settings saved | threads=%1 masterGain=%2 sampleRate=%3 aiRetrain=%4 autoPitch=%5 vib=%6c/%7Hz lowEnd=%8")
                                .arg(m_settings.maxRenderThreads)
@@ -721,7 +727,17 @@ void MainWindow::exportWav() {
         const auto mappedTrack = applyDictionary(track);
         const auto phonemizedTrack = applyPhonemizer(mappedTrack);
         const auto pitchedTrack = applyPitchEnhancements(phonemizedTrack);
-        auto rendered = m_resampler.renderTrack(pitchedTrack, *vb, effectiveSampleRate, effectiveThreads);
+        pyutau::core::RenderRequest request;
+        request.track = &pitchedTrack;
+        request.voicebank = vb;
+        request.sampleRate = effectiveSampleRate;
+        request.maxThreads = effectiveThreads;
+        request.backend = (m_settings.renderBackend == 1)
+            ? pyutau::core::RenderBackendType::Vulkan
+            : pyutau::core::RenderBackendType::OpenGL;
+        request.enableAutoPitchPrediction = m_settings.enableAutoPitchLine;
+        request.enableSmoothTransition = true;
+        auto rendered = m_resampler.renderTrack(request);
         if (rendered.pcm.empty()) {
             continue;
         }
@@ -802,6 +818,59 @@ void MainWindow::exportWav() {
                                .arg(breathMode)
                                .arg(phonemizerSummary)
                                .arg(QString::number(totalRenderMs, 'f', 2)));
+}
+
+
+
+void MainWindow::autoPredictPitchForSelectedTrack() {
+    if (!m_trackList || m_trackList->currentRow() < 0 || m_trackList->currentRow() >= static_cast<int>(m_project.tracks().size())) {
+        return;
+    }
+
+    auto& track = m_project.tracks()[static_cast<std::size_t>(m_trackList->currentRow())];
+    for (auto& note : track.notes) {
+        note.pitchBendCents.clear();
+        note.pitchBendCents.reserve(24);
+        for (int i = 0; i < 24; ++i) {
+            const double t = static_cast<double>(i) / 23.0;
+            int cents = 0;
+            if (t < 0.12) {
+                cents = static_cast<int>(-26.0 * (1.0 - t / 0.12));
+            } else if (t > 0.40) {
+                cents = static_cast<int>(static_cast<double>(m_settings.autoVibratoDepthCents) * std::sin(2.0 * 3.14159265358979323846 * m_settings.autoVibratoRateHz * t));
+            }
+            note.pitchBendCents.push_back(cents);
+        }
+    }
+
+    m_pianoRoll->setTrack(&track);
+    m_statusLabel->setText("Auto pitch-line prediction applied to selected track.");
+}
+
+void MainWindow::manualAdjustPitchForSelectedTrack() {
+    if (!m_trackList || m_trackList->currentRow() < 0 || m_trackList->currentRow() >= static_cast<int>(m_project.tracks().size())) {
+        return;
+    }
+
+    bool ok = false;
+    const int offset = QInputDialog::getInt(this, "Manual Pitch Offset", "Offset (cents)", 0, -240, 240, 1, &ok);
+    if (!ok) {
+        return;
+    }
+
+    auto& track = m_project.tracks()[static_cast<std::size_t>(m_trackList->currentRow())];
+    for (auto& note : track.notes) {
+        if (note.pitchBendCents.empty()) {
+            note.pitchBendCents.push_back(offset);
+        } else {
+            for (auto& v : note.pitchBendCents) {
+                v += offset;
+            }
+        }
+    }
+
+    m_pianoRoll->setTrack(&track);
+    m_statusLabel->setText(QString("Manual pitch offset applied: %1 cents").arg(offset));
 }
 
 bool MainWindow::tryParseVersionTag(const std::string& tag, VersionToken& out) {
@@ -1066,6 +1135,8 @@ void MainWindow::buildUi() {
     auto* editMenu = menuBar()->addMenu("Edit");
     editMenu->addAction("Track Settings", this, &MainWindow::openTrackSettings, QKeySequence("Ctrl+T"));
     editMenu->addAction("Dictionary", this, &MainWindow::manageDictionary, QKeySequence("Ctrl+D"));
+    editMenu->addAction("Auto Predict Pitch", this, &MainWindow::autoPredictPitchForSelectedTrack, QKeySequence("Ctrl+Shift+P"));
+    editMenu->addAction("Manual Pitch Offset", this, &MainWindow::manualAdjustPitchForSelectedTrack, QKeySequence("Ctrl+Alt+P"));
 
     auto* projectMenu = menuBar()->addMenu("Project");
     projectMenu->addAction("Voicebank Manager", this, &MainWindow::manageVoicebanks);
@@ -1116,6 +1187,7 @@ void MainWindow::buildUi() {
     editToolBar->addAction("Track Settings", this, &MainWindow::openTrackSettings);
     editToolBar->addAction("Dictionary", this, &MainWindow::manageDictionary);
     editToolBar->addAction("About/Updates", this, &MainWindow::showAboutAndUpdates);
+    editToolBar->addAction("AutoPitch", this, &MainWindow::autoPredictPitchForSelectedTrack);
 
     auto* root = new QWidget(this);
     auto* rootLayout = new QVBoxLayout(root);

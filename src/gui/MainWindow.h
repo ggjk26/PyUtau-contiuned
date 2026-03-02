@@ -37,6 +37,8 @@ private slots:
     void trackSelectionChanged();
     void exportWav();
     void showAboutAndUpdates();
+    void autoPredictPitchForSelectedTrack();
+    void manualAdjustPitchForSelectedTrack();
 
 private:
     enum class PhonemizerType {
@@ -55,6 +57,7 @@ private:
         double autoVibratoRateHz = 5.5;
         bool lowEndDeviceMode = false;
         bool skipMultiPhonemizerWarning = false;
+        int renderBackend = 0; // 0=OpenGL, 1=Vulkan
     };
 
     struct VersionToken {
