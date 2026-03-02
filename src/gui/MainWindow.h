@@ -1,0 +1,99 @@
+#pragma once
+
+#include "audio/AudioEngine.h"
+#include "core/Project.h"
+#include "core/Resampler.h"
+#include "core/UstParser.h"
+#include "core/Voicebank.h"
+#include "gui/PianoRollWidget.h"
+
+#include <QMainWindow>
+#include <QString>
+#include <unordered_map>
+#include <vector>
+
+QT_BEGIN_NAMESPACE
+class QLabel;
+class QListWidget;
+class QProgressBar;
+QT_END_NAMESPACE
+
+namespace pyutau::gui {
+
+class MainWindow : public QMainWindow {
+    Q_OBJECT
+
+public:
+    explicit MainWindow(QWidget* parent = nullptr);
+
+private slots:
+    void openUst();
+    void openVoicebank();
+    void manageVoicebanks();
+    void manageDictionary();
+    void openSettings();
+    void addTrack();
+    void openTrackSettings();
+    void trackSelectionChanged();
+    void exportWav();
+    void showAboutAndUpdates();
+
+private:
+    enum class PhonemizerType {
+        JpVcvCvvc = 0,
+        DiffSingerJapanese = 1,
+        PyUtauNative = 2,
+    };
+
+    struct AppSettings {
+        unsigned int maxRenderThreads = 0;
+        float masterGain = 0.95F;
+        int sampleRate = 44100;
+        bool enableVoicebankAiRetrain = false;
+        bool enableAutoPitchLine = true;
+        int autoVibratoDepthCents = 18;
+        double autoVibratoRateHz = 5.5;
+        bool lowEndDeviceMode = false;
+        bool skipMultiPhonemizerWarning = false;
+    };
+
+    struct VersionToken {
+        int major = 0;
+        int minor = 0;
+        int patch = 0;
+        int stage = 3; // preview(0) < alpha(1) < beta(2) < release(3)
+    };
+
+    [[nodiscard]] pyutau::core::Track applyDictionary(const pyutau::core::Track& track) const;
+    [[nodiscard]] pyutau::core::Track applyPitchEnhancements(const pyutau::core::Track& track) const;
+    [[nodiscard]] pyutau::core::Track applyPhonemizer(const pyutau::core::Track& track) const;
+    [[nodiscard]] static bool tryParseVersionTag(const std::string& tag, VersionToken& out);
+    [[nodiscard]] static int compareVersion(const VersionToken& lhs, const VersionToken& rhs);
+    [[nodiscard]] static std::string detectGitHubRepoFromGitRemote();
+    [[nodiscard]] static std::string fetchLatestReleaseTag(const std::string& repo);
+    [[nodiscard]] static std::vector<std::pair<QString, QString>> fetchOpenIssues(const std::string& repo);
+    [[nodiscard]] static QString phonemizerTypeToLabel(int type);
+    void buildUi();
+    void applySynthVInspiredStyle();
+    void bindProjectToUi();
+    void updateRenderProgress(int current, int total, const QString& stage);
+    void updateWindowTitle();
+    void showIssueFeedbackDialog();
+
+    pyutau::core::Project m_project;
+    pyutau::core::UstParser m_parser;
+    pyutau::core::Resampler m_resampler;
+    pyutau::audio::AudioEngine m_audio;
+
+    std::unordered_map<std::string, pyutau::core::Voicebank> m_voicebankPool;
+    std::unordered_map<std::string, std::string> m_lyricDictionary;
+    AppSettings m_settings;
+    QString m_projectFileName = "未命名";
+
+    QLabel* m_statusLabel = nullptr;
+    QProgressBar* m_renderProgress = nullptr;
+    QListWidget* m_trackList = nullptr;
+    PianoRollWidget* m_pianoRoll = nullptr;
+};
+
+} // namespace pyutau::gui
