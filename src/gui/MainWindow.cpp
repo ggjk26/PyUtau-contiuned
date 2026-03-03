@@ -955,7 +955,11 @@ std::vector<std::pair<QString, QString>> MainWindow::fetchOpenIssues(const std::
     const auto json = QString::fromUtf8(process.readAllStandardOutput());
     std::vector<std::pair<QString, QString>> issues;
 
-    QRegularExpression objectRe(R"(\{[^\{\}]*"title"\s*:\s*"([^"]+)"[^\{\}]*"html_url"\s*:\s*"([^"]+/issues/\d+)"[^\{\}]*\})");
+    QRegularExpression objectRe(
+    "\\{[^\\{\\}]*\"title\"\\s*:\\s*\"([^\"]+)\""
+    "[^\\{\\}]*\"html_url\"\\s*:\\s*\"([^\"]+/issues/\\d+)\""
+    "[^\\{\\}]*\\}"
+);
     auto it = objectRe.globalMatch(json);
     while (it.hasNext()) {
         const auto m = it.next();
