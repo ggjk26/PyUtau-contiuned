@@ -1,0 +1,29 @@
+#pragma once
+
+#include <filesystem>
+#include <string>
+#include <unordered_map>
+
+namespace pyutau::core {
+
+struct OtoEntry {
+    std::string wav;
+    std::string alias;
+    double offsetMs = 0.0;
+    double consonantMs = 0.0;
+    double cutoffMs = 0.0;
+    double preutterMs = 0.0;
+    double overlapMs = 0.0;
+};
+
+class Voicebank {
+public:
+    bool loadFromDirectory(const std::filesystem::path& path);
+    [[nodiscard]] const OtoEntry* lookup(const std::string& lyric) const;
+    [[nodiscard]] std::size_t size() const;
+
+private:
+    std::unordered_map<std::string, OtoEntry> m_dictionary;
+};
+
+} // namespace pyutau::core
