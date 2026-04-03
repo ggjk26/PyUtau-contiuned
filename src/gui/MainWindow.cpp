@@ -125,6 +125,28 @@ void MainWindow::updateWindowTitle() {
     setWindowTitle(QString("PyUTAU Continued - %1").arg(m_projectFileName));
 }
 
+pyutau::core::Track* MainWindow::currentTrack() {
+    if (!m_trackList) {
+        return nullptr;
+    }
+    const int row = m_trackList->currentRow();
+    if (row < 0 || row >= static_cast<int>(m_project.tracks().size())) {
+        return nullptr;
+    }
+    return &m_project.tracks()[static_cast<std::size_t>(row)];
+}
+
+const pyutau::core::Track* MainWindow::currentTrack() const {
+    if (!m_trackList) {
+        return nullptr;
+    }
+    const int row = m_trackList->currentRow();
+    if (row < 0 || row >= static_cast<int>(m_project.tracks().size())) {
+        return nullptr;
+    }
+    return &m_project.tracks()[static_cast<std::size_t>(row)];
+}
+
 void MainWindow::openUst() {
     const auto path = QFileDialog::getOpenFileName(this, "Open UST / USTX", {}, "UTAU project files (*.ust *.ustx)");
     if (path.isEmpty()) {
@@ -247,7 +269,8 @@ void MainWindow::manageVoicebanks() {
     }
 
     if (action == "分配声库到当前音轨") {
-        if (!m_trackList || m_trackList->currentRow() < 0 || m_trackList->currentRow() >= static_cast<int>(m_project.tracks().size())) {
+        auto* trackPtr = currentTrack();
+        if (!trackPtr) {
             QMessageBox::information(this, "声库管理", "请先选中一个音轨。");
             return;
         }
@@ -268,7 +291,7 @@ void MainWindow::manageVoicebanks() {
             return;
         }
 
-        auto& track = m_project.tracks()[static_cast<std::size_t>(m_trackList->currentRow())];
+        auto& track = *trackPtr;
         track.voicebankId = selected.toStdString();
         bindProjectToUi();
         m_statusLabel->setText(QString("Assigned %1 -> %2")
@@ -466,12 +489,13 @@ void MainWindow::addTrack() {
 }
 
 void MainWindow::openTrackSettings() {
-    if (!m_trackList || m_trackList->currentRow() < 0 || m_trackList->currentRow() >= static_cast<int>(m_project.tracks().size())) {
+    auto* trackPtr = currentTrack();
+    if (!trackPtr) {
         QMessageBox::information(this, "Track Settings", "请先选中一个音轨。");
         return;
     }
 
-    auto& track = m_project.tracks()[static_cast<std::size_t>(m_trackList->currentRow())];
+    auto& track = *trackPtr;
 
     QDialog dialog(this);
     dialog.setWindowTitle("Track Settings");
@@ -520,16 +544,9 @@ void MainWindow::openTrackSettings() {
 }
 
 void MainWindow::trackSelectionChanged() {
-    if (!m_trackList) {
-        return;
+    if (const auto* track = currentTrack()) {
+        m_pianoRoll->setTrack(track);
     }
-
-    const auto idx = m_trackList->currentRow();
-    if (idx < 0 || idx >= static_cast<int>(m_project.tracks().size())) {
-        return;
-    }
-
-    m_pianoRoll->setTrack(&m_project.tracks()[static_cast<std::size_t>(idx)]);
 }
 
 pyutau::core::Track MainWindow::applyDictionary(const pyutau::core::Track& track) const {
@@ -826,11 +843,12 @@ void MainWindow::exportWav() {
 
 
 void MainWindow::autoPredictPitchForSelectedTrack() {
-    if (!m_trackList || m_trackList->currentRow() < 0 || m_trackList->currentRow() >= static_cast<int>(m_project.tracks().size())) {
+    auto* trackPtr = currentTrack();
+    if (!trackPtr) {
         return;
     }
 
-    auto& track = m_project.tracks()[static_cast<std::size_t>(m_trackList->currentRow())];
+    auto& track = *trackPtr;
     for (auto& note : track.notes) {
         note.pitchBendCents.clear();
         note.pitchBendCents.reserve(24);
@@ -851,7 +869,8 @@ void MainWindow::autoPredictPitchForSelectedTrack() {
 }
 
 void MainWindow::manualAdjustPitchForSelectedTrack() {
-    if (!m_trackList || m_trackList->currentRow() < 0 || m_trackList->currentRow() >= static_cast<int>(m_project.tracks().size())) {
+    auto* trackPtr = currentTrack();
+    if (!trackPtr) {
         return;
     }
 
@@ -861,7 +880,7 @@ void MainWindow::manualAdjustPitchForSelectedTrack() {
         return;
     }
 
-    auto& track = m_project.tracks()[static_cast<std::size_t>(m_trackList->currentRow())];
+    auto& track = *trackPtr;
     for (auto& note : track.notes) {
         if (note.pitchBendCents.empty()) {
             note.pitchBendCents.push_back(offset);
@@ -1257,11 +1276,12 @@ void MainWindow::buildUi() {
     });
 
     connect(m_pianoRoll, &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
-        if (!m_trackList || m_trackList->currentRow() < 0 || m_trackList->currentRow() >= static_cast<int>(m_project.tracks().size())) {
+        auto* trackPtr = currentTrack();
+        if (!trackPtr) {
             return;
         }
 
-        auto& track = m_project.tracks()[static_cast<std::size_t>(m_trackList->currentRow())];
+        auto& track = *trackPtr;
         QMenu menu(this);
         auto* addNoteAction = menu.addAction("Add Note Here");
         auto* deleteNoteAction = menu.addAction("Delete Note Here");

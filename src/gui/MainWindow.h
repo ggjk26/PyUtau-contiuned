@@ -82,6 +82,8 @@ private:
     void updateRenderProgress(int current, int total, const QString& stage);
     void updateWindowTitle();
     void showIssueFeedbackDialog();
+    pyutau::core::Track* currentTrack();
+    const pyutau::core::Track* currentTrack() const;
 
     pyutau::core::Project m_project;
     pyutau::core::UstParser m_parser;
